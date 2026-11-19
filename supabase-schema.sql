@@ -1,0 +1,149 @@
+-- =========================================================================
+-- AL BAZZAM ENTERPRISE IT & CMS - SUPABASE DATABASE INITIALIZATION SCRIPT
+-- Run this in your Supabase Dashboard: SQL Editor -> New Query -> Run
+-- =========================================================================
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 1. TICKETS TABLE (Incident triage & management)
+CREATE TABLE IF NOT EXISTS public.tickets (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  title TEXT NOT NULL,
+  description TEXT,
+  category TEXT DEFAULT 'Software',
+  department TEXT DEFAULT 'IT Department',
+  priority TEXT DEFAULT 'Medium',
+  status TEXT DEFAULT 'Open',
+  requester JSONB DEFAULT '{}'::jsonb,
+  assigned_to TEXT,
+  conversation JSONB DEFAULT '[]'::jsonb,
+  attachments JSONB DEFAULT '[]'::jsonb,
+  unread BOOLEAN DEFAULT false,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 2. SERVICES TABLE (Website CMS Services & Solutions)
+CREATE TABLE IF NOT EXISTS public.services (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  title TEXT NOT NULL,
+  category TEXT DEFAULT 'Core',
+  badge TEXT,
+  description TEXT,
+  deliverables JSONB DEFAULT '[]'::jsonb,
+  icon TEXT DEFAULT 'Wrench',
+  image TEXT,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 3. CAREERS TABLE (Website CMS Career Openings)
+CREATE TABLE IF NOT EXISTS public.careers (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  title TEXT NOT NULL,
+  department TEXT NOT NULL,
+  location TEXT DEFAULT 'Abu Dhabi / Dubai, UAE',
+  type TEXT DEFAULT 'Full Time',
+  experience TEXT DEFAULT '3+ Years',
+  qualification TEXT DEFAULT 'Degree / Diploma in relevant field',
+  description TEXT,
+  responsibilities JSONB DEFAULT '[]'::jsonb,
+  requirements JSONB DEFAULT '[]'::jsonb,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 4. TRUSTED PARTNERS TABLE (Website CMS Partners & Group Entities)
+CREATE TABLE IF NOT EXISTS public.trusted_partners (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  name TEXT NOT NULL,
+  logo TEXT,
+  website_url TEXT,
+  description TEXT,
+  active BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- 5. TEAM MEMBERS TABLE (Staff Directory & System Access)
+CREATE TABLE IF NOT EXISTS public.team_members (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE NOT NULL,
+  password TEXT DEFAULT 'password123',
+  role TEXT DEFAULT 'IT Support Lead',
+  department TEXT DEFAULT 'IT Department',
+  status TEXT DEFAULT 'Active',
+  phone TEXT,
+  avatar TEXT,
+  tickets_assigned INTEGER DEFAULT 0,
+  last_active TEXT DEFAULT 'Just now',
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Ensure all tables have automatic UUID defaults if created previously
+ALTER TABLE public.tickets ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+ALTER TABLE public.services ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+ALTER TABLE public.careers ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+ALTER TABLE public.trusted_partners ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+ALTER TABLE public.team_members ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+
+-- =========================================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES
+-- =========================================================================
+
+ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.services ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.careers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.trusted_partners ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.team_members ENABLE ROW LEVEL SECURITY;
+
+-- Tickets policies (Idempotent)
+DROP POLICY IF EXISTS "Public Read Tickets" ON public.tickets;
+DROP POLICY IF EXISTS "Public Insert Tickets" ON public.tickets;
+DROP POLICY IF EXISTS "Public Update Tickets" ON public.tickets;
+DROP POLICY IF EXISTS "Public Delete Tickets" ON public.tickets;
+CREATE POLICY "Public Read Tickets" ON public.tickets FOR SELECT USING (true);
+CREATE POLICY "Public Insert Tickets" ON public.tickets FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Tickets" ON public.tickets FOR UPDATE USING (true);
+CREATE POLICY "Public Delete Tickets" ON public.tickets FOR DELETE USING (true);
+
+-- Services policies (Idempotent)
+DROP POLICY IF EXISTS "Public Read Services" ON public.services;
+DROP POLICY IF EXISTS "Public Insert Services" ON public.services;
+DROP POLICY IF EXISTS "Public Update Services" ON public.services;
+DROP POLICY IF EXISTS "Public Delete Services" ON public.services;
+CREATE POLICY "Public Read Services" ON public.services FOR SELECT USING (true);
+CREATE POLICY "Public Insert Services" ON public.services FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Services" ON public.services FOR UPDATE USING (true);
+CREATE POLICY "Public Delete Services" ON public.services FOR DELETE USING (true);
+
+-- Careers policies (Idempotent)
+DROP POLICY IF EXISTS "Public Read Careers" ON public.careers;
+DROP POLICY IF EXISTS "Public Insert Careers" ON public.careers;
+DROP POLICY IF EXISTS "Public Update Careers" ON public.careers;
+DROP POLICY IF EXISTS "Public Delete Careers" ON public.careers;
+CREATE POLICY "Public Read Careers" ON public.careers FOR SELECT USING (true);
+CREATE POLICY "Public Insert Careers" ON public.careers FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Careers" ON public.careers FOR UPDATE USING (true);
+CREATE POLICY "Public Delete Careers" ON public.careers FOR DELETE USING (true);
+
+-- Trusted Partners policies (Idempotent)
+DROP POLICY IF EXISTS "Public Read Partners" ON public.trusted_partners;
+DROP POLICY IF EXISTS "Public Insert Partners" ON public.trusted_partners;
+DROP POLICY IF EXISTS "Public Update Partners" ON public.trusted_partners;
+DROP POLICY IF EXISTS "Public Delete Partners" ON public.trusted_partners;
+CREATE POLICY "Public Read Partners" ON public.trusted_partners FOR SELECT USING (true);
+CREATE POLICY "Public Insert Partners" ON public.trusted_partners FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Partners" ON public.trusted_partners FOR UPDATE USING (true);
+CREATE POLICY "Public Delete Partners" ON public.trusted_partners FOR DELETE USING (true);
+
+-- Team Members policies (Idempotent)
+DROP POLICY IF EXISTS "Public Read Team" ON public.team_members;
+DROP POLICY IF EXISTS "Public Insert Team" ON public.team_members;
+DROP POLICY IF EXISTS "Public Update Team" ON public.team_members;
+DROP POLICY IF EXISTS "Public Delete Team" ON public.team_members;
+CREATE POLICY "Public Read Team" ON public.team_members FOR SELECT USING (true);
+CREATE POLICY "Public Insert Team" ON public.team_members FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Team" ON public.team_members FOR UPDATE USING (true);
+CREATE POLICY "Public Delete Team" ON public.team_members FOR DELETE USING (true);
