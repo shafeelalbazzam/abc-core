@@ -26,19 +26,36 @@ import {
   RotateCcw,
   ChevronDown,
   Mail,
-  MailOpen
+  MailOpen,
+  Edit,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
+import EditTicketModal from './EditTicketModal';
+import ConfirmDialog from '../common/ConfirmDialog';
+import {
+  groupMessagesByDate,
+  formatWhatsAppListTimestamp,
+  getWhatsAppDateLabel
+} from '../../utils/dateGrouping';
 
 export default function TicketManagement({
   tickets,
+  currentUser,
   onSelectTicket,
   onOpenCreateTicket,
   onUpdateTicketStatus,
+  onEditTicket,
+  onDeleteTicket,
   teamMembers,
   currentUserRole = 'support',
   onAddReply,
+  onEditReply,
+  onDeleteReply,
   onAddAttachment,
-  onToggleReadTicket
+  onToggleReadTicket,
+  onRefreshTickets,
+  isRefreshingTickets = false
 }) {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedStatus, setSelectedStatus] = useState('All');
@@ -47,6 +64,15 @@ export default function TicketManagement({
   const [selectedReadFilter, setSelectedReadFilter] = useState('all'); // 'all' | 'unread' | 'read'
   const [selectedTicketId, setSelectedTicketId] = useState(tickets[0]?.id || null);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
+
+  // Edit and Delete State
+  const [editingTicket, setEditingTicket] = useState(null);
+  const [ticketToDelete, setTicketToDelete] = useState(null);
+
+  // Edit and Delete Individual Note / Message State
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteText, setEditingNoteText] = useState('');
+  const [noteToDelete, setNoteToDelete] = useState(null);
 
   // Date Filter States
   const [selectedDateFilter, setSelectedDateFilter] = useState('all'); // 'all' | 'today' | 'week' | 'month' | 'six_months' | 'custom'
@@ -200,16 +226,41 @@ export default function TicketManagement({
     }
   };
 
+  const getDynamicAuthor = () => {
+    if (currentUser?.name) {
+      if (currentUserRole === 'support') {
+        const deptOrRole = currentUser.department || currentUser.role || 'IT Support';
+        return `${currentUser.name} (${deptOrRole})`;
+      }
+      return currentUser.name;
+    }
+    return currentUserRole === 'support' ? 'IT Support Specialist' : (activeTicket?.requester?.name || 'Requester');
+  };
+
+  const getDynamicRole = () => {
+    if (currentUserRole === 'support') {
+      return currentUser?.role || 'Support Engineer';
+    }
+    return 'Requester';
+  };
+
+  const formatMsgAuthor = (author) => {
+    if (!author || author.includes('Alex Rivera') || author.includes('Alex Rivers')) {
+      return getDynamicAuthor();
+    }
+    return author;
+  };
+
   const handleSendReply = (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     if (!replyText.trim() || !activeTicket) return;
 
     if (onAddReply) {
       onAddReply(activeTicket.id, {
-        content: replyText,
+        content: replyText.trim(),
         isInternal: currentUserRole === 'support' ? isInternalNote : false,
-        author: currentUserRole === 'support' ? 'Alex Rivera (IT Support)' : (activeTicket?.requester?.name || 'Requester'),
-        role: currentUserRole === 'support' ? 'Support Engineer' : 'Requester',
+        author: getDynamicAuthor(),
+        role: getDynamicRole(),
         time: 'Just now'
       });
     }
@@ -225,8 +276,8 @@ export default function TicketManagement({
       onAddReply(activeTicket.id, {
         content: `✅ RESOLUTION SUMMARY: ${finalNote}`,
         isInternal: false,
-        author: 'Alex Rivera (IT Support)',
-        role: 'Support Engineer',
+        author: getDynamicAuthor(),
+        role: getDynamicRole(),
         time: 'Just now'
       });
     }
@@ -331,10 +382,27 @@ export default function TicketManagement({
         {/* Filter & Search Bar */}
         <div className="p-3.5 border-b border-neutral-200 dark:border-neutral-800 space-y-3 bg-neutral-50/50 dark:bg-neutral-900/40">
           <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="text-xs font-mono font-bold tracking-wider text-neutral-700 dark:text-neutral-300 uppercase">
                 {currentUserRole === 'employee' ? 'My Incidents' : 'Incident Queue'} ({sortedTickets.length})
               </span>
+              <span className="hidden sm:inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-300 dark:border-emerald-800 text-[10px] font-mono text-emerald-700 dark:text-emerald-300 font-semibold" title="Live Supabase Realtime synchronization active">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span>Realtime</span>
+              </span>
+
+              {onRefreshTickets && (
+                <button
+                  type="button"
+                  onClick={onRefreshTickets}
+                  disabled={isRefreshingTickets}
+                  className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-700 text-[10px] font-mono text-neutral-600 dark:text-neutral-300 transition-colors disabled:opacity-50"
+                  title="Sync incidents from Supabase now"
+                >
+                  <RefreshCw className={`w-3 h-3 ${isRefreshingTickets ? 'animate-spin text-emerald-500' : 'text-neutral-400'}`} />
+                  <span>{isRefreshingTickets ? 'Syncing...' : 'Sync'}</span>
+                </button>
+              )}
               {unreadTotalCount > 0 && (
                 <button
                   type="button"
@@ -650,24 +718,7 @@ export default function TicketManagement({
                       {ticket.status}
                     </span>
 
-                    {/* Quick Gmail Mark As Read/Unread Icon */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (onToggleReadTicket) {
-                          onToggleReadTicket(ticket.id, !isUnread);
-                        }
-                      }}
-                      className="p-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-700 text-neutral-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-                      title={isUnread ? 'Mark as Read' : 'Mark as Unread'}
-                    >
-                      {isUnread ? (
-                        <Mail className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 fill-blue-600/20" />
-                      ) : (
-                        <MailOpen className="w-3.5 h-3.5 opacity-50 group-hover:opacity-100" />
-                      )}
-                    </button>
+
                   </div>
                 </div>
 
@@ -681,13 +732,13 @@ export default function TicketManagement({
                   {ticket.subject}
                 </h4>
 
-                {/* Bottom Row - Requester & Time */}
+                {/* Bottom Row - Requester & WhatsApp-style Time */}
                 <div className="flex items-center justify-between text-xs font-mono">
                   <span className={`truncate max-w-[210px] ${isUnread ? 'font-semibold text-neutral-900 dark:text-neutral-200' : 'text-neutral-500 dark:text-neutral-400'}`}>
                     {(ticket.requester?.name || (typeof ticket.requester === 'string' ? ticket.requester : 'Staff Member'))} • {ticket.category}
                   </span>
                   <span className={`shrink-0 ${isUnread ? 'font-bold text-blue-600 dark:text-blue-400' : 'text-neutral-400 dark:text-neutral-500'}`}>
-                    {ticket.updatedAt}
+                    {formatWhatsAppListTimestamp(ticket.updated_at || ticket.created_at || ticket.updatedAt, ticket.created_at)}
                   </span>
                 </div>
               </div>
@@ -751,10 +802,32 @@ export default function TicketManagement({
               )}
             </div>
 
-            <div className="flex items-center gap-4 text-xs text-neutral-600 dark:text-neutral-400 font-mono">
-              <span className="flex items-center gap-1.5">
-                <Clock className="w-4 h-4 text-amber-500 dark:text-amber-400" /> SLA Target: <strong className="text-neutral-900 dark:text-white">{activeTicket.slaDue}</strong>
-              </span>
+            <div className="flex items-center gap-3">
+
+
+              {/* Edit Ticket Button */}
+              <button
+                type="button"
+                onClick={() => setEditingTicket(activeTicket)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 text-xs font-mono font-semibold transition-colors border border-neutral-300 dark:border-neutral-700"
+                title="Edit incident details"
+              >
+                <Edit className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Edit</span>
+              </button>
+
+              {/* Delete Ticket Button */}
+              {currentUserRole === 'support' && (
+                <button
+                  type="button"
+                  onClick={() => setTicketToDelete(activeTicket)}
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 text-xs font-mono font-semibold transition-colors"
+                  title="Delete this incident"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Delete</span>
+                </button>
+              )}
             </div>
           </div>
 
@@ -869,36 +942,116 @@ export default function TicketManagement({
                   )}
                 </div>
 
-                {/* Timeline Messages */}
-                {activeTicket.timeline && activeTicket.timeline.map((msg) => {
-                  if (currentUserRole === 'employee' && msg.isInternal) return null;
-
-                  return (
-                    <div
-                      key={msg.id}
-                      className={`p-4 rounded-lg text-sm space-y-2 ${msg.isInternal
-                        ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50 text-amber-950 dark:text-amber-200'
-                        : msg.content.includes('✅ RESOLUTION')
-                          ? 'bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/50 text-emerald-950 dark:text-emerald-200'
-                          : 'bg-white dark:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 shadow-2xs'
-                        }`}
-                    >
-                      <div className="flex items-center justify-between text-xs font-mono">
-                        <div className="flex items-center gap-2">
-                          {msg.isInternal && (
-                            <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500 text-neutral-950">
-                              STAFF INTERNAL
-                            </span>
-                          )}
-                          <span className="font-bold text-neutral-900 dark:text-white">{msg.author}</span>
-                          <span className="text-neutral-500">({msg.role})</span>
-                        </div>
-                        <span className="text-neutral-500">{msg.time}</span>
-                      </div>
-                      <p className="leading-relaxed whitespace-pre-wrap font-sans text-sm">{msg.content}</p>
+                {/* WhatsApp-Style Timeline Messages with Date Dividers */}
+                {groupMessagesByDate(activeTicket.timeline || [], activeTicket.created_at).map((group) => (
+                  <div key={group.dateKey} className="space-y-3">
+                    {/* Centered WhatsApp Sticky Date Divider */}
+                    <div className="flex items-center justify-center my-3.5 sticky top-0 z-10 pointer-events-none">
+                      <span className="px-3 py-1 rounded-full text-[11px] font-mono font-bold bg-neutral-200/90 dark:bg-neutral-800/90 text-neutral-700 dark:text-neutral-300 shadow-2xs backdrop-blur-xs border border-neutral-300/70 dark:border-neutral-700/70 tracking-wide">
+                        {group.dateLabel}
+                      </span>
                     </div>
-                  );
-                })}
+
+                    {/* Messages under this Date */}
+                    {group.messages.map((msg) => {
+                      if (currentUserRole === 'employee' && msg.isInternal) return null;
+                      const isBeingEdited = editingNoteId === msg.id;
+
+                      return (
+                        <div
+                          key={msg.id}
+                          className={`p-4 rounded-lg text-sm space-y-2 ${msg.isInternal
+                            ? 'bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800/50 text-amber-950 dark:text-amber-200'
+                            : msg.content.includes('✅ RESOLUTION')
+                              ? 'bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-800/50 text-emerald-950 dark:text-emerald-200'
+                              : 'bg-white dark:bg-neutral-900/90 border border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 shadow-2xs'
+                            }`}
+                        >
+                          <div className="flex items-center justify-between text-xs font-mono">
+                            <div className="flex items-center gap-2">
+                              {msg.isInternal && (
+                                <span className="text-[10px] font-bold px-1.5 py-0.2 rounded bg-amber-500 text-neutral-950">
+                                  STAFF INTERNAL
+                                </span>
+                              )}
+                              <span className="font-bold text-neutral-900 dark:text-white">{formatMsgAuthor(msg.author)}</span>
+                              <span className="text-neutral-500">({msg.role})</span>
+                              {msg.edited && (
+                                <span className="text-[10px] text-neutral-400 italic font-mono">(edited)</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-neutral-500 font-mono text-[11px] font-semibold">{msg._formattedTime || msg.time}</span>
+                              {currentUserRole === 'support' && !isBeingEdited && (
+                                <div className="flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setEditingNoteId(msg.id);
+                                      setEditingNoteText(msg.content);
+                                    }}
+                                    className="p-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-500 hover:text-emerald-600 transition-colors"
+                                    title="Edit note"
+                                  >
+                                    <Edit className="w-3.5 h-3.5" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setNoteToDelete({ ticketId: activeTicket.id, noteId: msg.id })}
+                                    className="p-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-500 hover:text-rose-600 transition-colors"
+                                    title="Delete note"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+
+                          {isBeingEdited ? (
+                            <div className="space-y-2 pt-1">
+                              <textarea
+                                rows={3}
+                                value={editingNoteText}
+                                onChange={(e) => setEditingNoteText(e.target.value)}
+                                className="w-full text-xs font-sans p-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                autoFocus
+                              />
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingNoteId(null);
+                                    setEditingNoteText('');
+                                  }}
+                                  className="px-2.5 py-1 text-xs rounded border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 font-mono font-medium"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!editingNoteText.trim()}
+                                  onClick={() => {
+                                    if (editingNoteText.trim() && onEditReply) {
+                                      onEditReply(activeTicket.id, msg.id, editingNoteText.trim());
+                                    }
+                                    setEditingNoteId(null);
+                                    setEditingNoteText('');
+                                  }}
+                                  className="px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold disabled:opacity-50"
+                                >
+                                  Save Note
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="leading-relaxed whitespace-pre-wrap font-sans text-sm">{msg.content}</p>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ))}
 
                 {/* Employee Rating prompt if solved */}
                 {activeTicket.status === 'Resolved' && currentUserRole === 'employee' && (
@@ -972,43 +1125,74 @@ export default function TicketManagement({
                       </button>
                     </div>
 
-                    <form onSubmit={handleSendReply} className="space-y-2">
-                      <textarea
-                        rows={2}
-                        placeholder={isInternalNote ? "Write private staff note..." : "Type reply to requester..."}
-                        value={replyText}
-                        onChange={(e) => setReplyText(e.target.value)}
-                        className="w-full p-3 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-sm text-neutral-900 dark:text-white placeholder-neutral-500 focus:outline-none focus:border-neutral-700 resize-none font-sans"
-                      />
+                    <form onSubmit={handleSendReply} className="space-y-1.5">
+                      <div className="relative flex items-center bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-lg focus-within:border-emerald-500 dark:focus-within:border-emerald-500 transition-colors p-1.5 pr-2 gap-2 shadow-2xs">
+                        <textarea
+                          rows={2}
+                          placeholder={isInternalNote ? "Write private staff note (Enter to send)..." : "Type reply to requester (Enter to send)..."}
+                          value={replyText}
+                          onChange={(e) => setReplyText(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' && !e.shiftKey) {
+                              e.preventDefault();
+                              handleSendReply(e);
+                            }
+                          }}
+                          className="flex-1 bg-transparent border-0 p-2 text-sm text-neutral-900 dark:text-white placeholder-neutral-500 focus:outline-none resize-none font-sans min-h-[46px] max-h-32"
+                        />
 
-                      <div className="flex items-center justify-end">
                         <button
                           type="submit"
-                          className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                          disabled={!replyText.trim()}
+                          className={`px-3 py-2.5 rounded-md flex items-center justify-center gap-1.5 text-xs font-bold transition-all shrink-0 self-end mb-0.5 ${replyText.trim()
+                            ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs cursor-pointer'
+                            : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-600 cursor-not-allowed'
+                            }`}
+                          title="Press Enter to send (or click here)"
                         >
-                          <Send className="w-3.5 h-3.5" />
-                          <span>{isInternalNote ? 'Save Internal Note' : 'Send Reply'}</span>
+                          <Send className="w-4 h-4" />
+                          <span className="hidden sm:inline">{isInternalNote ? 'Save Note' : 'Send'}</span>
                         </button>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[11px] text-neutral-400 font-mono px-1">
+                        <span>Press <kbd className="px-1 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 text-[10px]">Enter ↵</kbd> to send • <kbd className="px-1 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 text-[10px]">Shift+Enter</kbd> for new line</span>
                       </div>
                     </form>
                   </>
                 ) : (
-                  <form onSubmit={handleSendReply} className="space-y-2">
-                    <textarea
-                      rows={2}
-                      placeholder="Reply to the IT engineer or confirm if resolved..."
-                      value={replyText}
-                      onChange={(e) => setReplyText(e.target.value)}
-                      className="w-full p-3 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-sm text-neutral-900 dark:text-white placeholder-neutral-500 focus:outline-none focus:border-neutral-700 resize-none font-sans"
-                    />
-                    <div className="flex items-center justify-end">
+                  <form onSubmit={handleSendReply} className="space-y-1.5">
+                    <div className="relative flex items-center bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-lg focus-within:border-emerald-500 dark:focus-within:border-emerald-500 transition-colors p-1.5 pr-2 gap-2 shadow-2xs">
+                      <textarea
+                        rows={2}
+                        placeholder="Reply to IT engineer (Enter to send)..."
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            handleSendReply(e);
+                          }
+                        }}
+                        className="flex-1 bg-transparent border-0 p-2 text-sm text-neutral-900 dark:text-white placeholder-neutral-500 focus:outline-none resize-none font-sans min-h-[46px] max-h-32"
+                      />
+
                       <button
                         type="submit"
-                        className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs"
+                        disabled={!replyText.trim()}
+                        className={`px-3 py-2.5 rounded-md flex items-center justify-center gap-1.5 text-xs font-bold transition-all shrink-0 self-end mb-0.5 ${replyText.trim()
+                          ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs cursor-pointer'
+                          : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-600 cursor-not-allowed'
+                          }`}
+                        title="Press Enter to send (or click here)"
                       >
-                        <Send className="w-3.5 h-3.5" />
-                        <span>Send Response</span>
+                        <Send className="w-4 h-4" />
+                        <span className="hidden sm:inline">Send</span>
                       </button>
+                    </div>
+
+                    <div className="flex items-center justify-between text-[11px] text-neutral-400 font-mono px-1">
+                      <span>Press <kbd className="px-1 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 text-[10px]">Enter ↵</kbd> to send • <kbd className="px-1 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 text-[10px]">Shift+Enter</kbd> for new line</span>
                     </div>
                   </form>
                 )}
@@ -1094,6 +1278,62 @@ export default function TicketManagement({
           Select an incident to view details
         </div>
       )}
+
+      {/* Edit Ticket Modal */}
+      <EditTicketModal
+        isOpen={!!editingTicket}
+        ticket={editingTicket}
+        onClose={() => setEditingTicket(null)}
+        onSave={(updatedTicket) => {
+          if (onEditTicket) onEditTicket(updatedTicket);
+          setEditingTicket(null);
+        }}
+        teamMembers={teamMembers}
+      />
+
+      {/* Confirm Delete Incident Dialog */}
+      <ConfirmDialog
+        isOpen={!!ticketToDelete}
+        title="Delete Incident"
+        message={
+          ticketToDelete
+            ? `Are you sure you want to permanently delete incident "${ticketToDelete.id}: ${ticketToDelete.subject || ticketToDelete.title}"? All conversation messages and attachments for this incident will be removed.`
+            : ''
+        }
+        confirmText="Delete Incident"
+        cancelText="Cancel"
+        icon="trash"
+        variant="danger"
+        onConfirm={() => {
+          if (ticketToDelete && onDeleteTicket) {
+            onDeleteTicket(ticketToDelete.id);
+            if (activeTicket?.id === ticketToDelete.id) {
+              const remaining = tickets.filter((t) => t.id !== ticketToDelete.id);
+              setSelectedTicketId(remaining[0]?.id || null);
+            }
+            setTicketToDelete(null);
+          }
+        }}
+        onCancel={() => setTicketToDelete(null)}
+      />
+
+      {/* Confirm Delete Note / Response Dialog */}
+      <ConfirmDialog
+        isOpen={!!noteToDelete}
+        title="Delete Incident Note"
+        message="Are you sure you want to delete this incident note / response? This cannot be undone."
+        confirmText="Delete Note"
+        cancelText="Cancel"
+        icon="trash"
+        variant="danger"
+        onConfirm={() => {
+          if (noteToDelete && onDeleteReply) {
+            onDeleteReply(noteToDelete.ticketId, noteToDelete.noteId);
+          }
+          setNoteToDelete(null);
+        }}
+        onCancel={() => setNoteToDelete(null)}
+      />
     </div>
   );
 }

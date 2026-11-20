@@ -48,6 +48,7 @@ export default function SettingsView({ theme, setTheme, onShowToast }) {
     }
     localStorage.setItem('abc_supabase_url', supabaseUrl.trim());
     localStorage.setItem('abc_supabase_anon_key', supabaseAnonKey.trim());
+    window.dispatchEvent(new Event('abc_supabase_config_changed'));
     setSupabaseStatus({ success: true, message: 'Supabase credentials saved! Connecting...' });
     onShowToast({ type: 'success', message: 'Supabase configuration saved.' });
 
@@ -58,6 +59,7 @@ export default function SettingsView({ theme, setTheme, onShowToast }) {
   const handleClearSupabase = () => {
     localStorage.removeItem('abc_supabase_url');
     localStorage.removeItem('abc_supabase_anon_key');
+    window.dispatchEvent(new Event('abc_supabase_config_changed'));
     setSupabaseUrl('');
     setSupabaseAnonKey('');
     setSupabaseStatus(null);
@@ -102,7 +104,7 @@ export default function SettingsView({ theme, setTheme, onShowToast }) {
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE IF NOT EXISTS public.tickets (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, title TEXT NOT NULL, description TEXT, category TEXT DEFAULT 'Software', department TEXT DEFAULT 'IT Department', priority TEXT DEFAULT 'Medium', status TEXT DEFAULT 'Open', requester JSONB DEFAULT '{}'::jsonb, assigned_to TEXT, conversation JSONB DEFAULT '[]'::jsonb, attachments JSONB DEFAULT '[]'::jsonb, unread BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());
-CREATE TABLE IF NOT EXISTS public.services (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, title TEXT NOT NULL, category TEXT DEFAULT 'Core', badge TEXT, description TEXT, deliverables JSONB DEFAULT '[]'::jsonb, icon TEXT DEFAULT 'Wrench', image TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS public.services (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, title TEXT NOT NULL, category TEXT DEFAULT 'Engineering', badge TEXT, tagline TEXT, description TEXT, image TEXT, images JSONB DEFAULT '[]'::jsonb, subcategories JSONB DEFAULT '[]'::jsonb, deliverables JSONB DEFAULT '[]'::jsonb, icon TEXT DEFAULT 'Wrench', status TEXT DEFAULT 'Active', active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS public.careers (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, title TEXT NOT NULL, department TEXT NOT NULL, location TEXT DEFAULT 'Abu Dhabi / Dubai, UAE', type TEXT DEFAULT 'Full Time', experience TEXT DEFAULT '3+ Years', qualification TEXT DEFAULT 'Degree / Diploma in relevant field', description TEXT, responsibilities JSONB DEFAULT '[]'::jsonb, requirements JSONB DEFAULT '[]'::jsonb, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS public.trusted_partners (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, name TEXT NOT NULL, logo TEXT, website_url TEXT, description TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS public.team_members (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT DEFAULT 'password123', role TEXT DEFAULT 'IT Support Lead', department TEXT DEFAULT 'IT Department', status TEXT DEFAULT 'Active', phone TEXT, avatar TEXT, tickets_assigned INTEGER DEFAULT 0, last_active TEXT DEFAULT 'Just now', created_at TIMESTAMPTZ DEFAULT NOW());
@@ -112,6 +114,13 @@ ALTER TABLE public.services ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
 ALTER TABLE public.careers ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
 ALTER TABLE public.trusted_partners ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
 ALTER TABLE public.team_members ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS unread BOOLEAN DEFAULT false;
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS tagline TEXT;
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS subcategories JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS deliverables JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active';
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.services ENABLE ROW LEVEL SECURITY;
@@ -162,7 +171,11 @@ DROP POLICY IF EXISTS "Public Delete Team" ON public.team_members;
 CREATE POLICY "Public Read Team" ON public.team_members FOR SELECT USING (true);
 CREATE POLICY "Public Insert Team" ON public.team_members FOR INSERT WITH CHECK (true);
 CREATE POLICY "Public Update Team" ON public.team_members FOR UPDATE USING (true);
-CREATE POLICY "Public Delete Team" ON public.team_members FOR DELETE USING (true);`;
+CREATE POLICY "Public Delete Team" ON public.team_members FOR DELETE USING (true);
+
+ALTER TABLE public.tickets REPLICA IDENTITY FULL;
+
+DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_publication_tables WHERE pubname = 'supabase_realtime' AND schemaname = 'public' AND tablename = 'tickets') THEN ALTER PUBLICATION supabase_realtime ADD TABLE public.tickets; END IF; END $$;`;
 
     navigator.clipboard?.writeText(schemaSql);
     setCopiedSchema(true);

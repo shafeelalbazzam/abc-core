@@ -69,35 +69,43 @@ export default function LoginScreen({ onLogin, teamMembers = [] }) {
           }
 
           // Role assignment:
-          // Staff accounts from team_members are standard employees by default.
-          // Only true system admins (email starts with admin@ or role equals admin) receive administrative privileges.
-          // Only explicit IT support technicians (support@ email or helpdesk specialist) receive triage queue access.
-          // All other staff accounts are employees who only see their own tickets!
+          // Staff with department 'IT Department' or admin receive full features access.
           const lowerRole = (member.role || '').toLowerCase().trim();
+          const lowerDept = (member.department || '').toLowerCase().trim();
           const isAdmin =
             cleanEmail.startsWith('admin@') ||
             cleanEmail === 'admin@albazzam.com' ||
             lowerRole === 'admin' ||
             lowerRole === 'administrator' ||
+            lowerRole === 'staff director' ||
+            lowerDept === 'admin' ||
             lowerRole === 'super admin' ||
             lowerRole === 'system administrator';
 
-          const isSupport =
-            !isAdmin &&
-            (cleanEmail.startsWith('support@') ||
-              cleanEmail.startsWith('helpdesk@') ||
-              lowerRole === 'it_support' ||
-              lowerRole === 'helpdesk specialist');
+          const isITDept =
+            lowerDept === 'it' ||
+            lowerDept === 'it department' ||
+            lowerDept.includes('it department') ||
+            lowerDept.startsWith('it') ||
+            lowerRole.includes('it support') ||
+            lowerRole.includes('software engineer') ||
+            lowerRole.includes('it admin') ||
+            lowerRole.includes('helpdesk') ||
+            cleanEmail.startsWith('support@') ||
+            cleanEmail.startsWith('helpdesk@') ||
+            lowerRole === 'it_support';
+
+          const isSupport = !isAdmin && isITDept;
 
           let assignedRole = 'employee';
-          let allowedTabs = ['portal', 'tickets'];
+          let allowedTabs = ['portal', 'tickets',];
 
           if (isAdmin) {
             assignedRole = 'admin';
             allowedTabs = ['dashboard', 'tickets', 'cms', 'team', 'settings'];
           } else if (isSupport) {
             assignedRole = 'it_support';
-            allowedTabs = ['dashboard', 'tickets', 'cms', 'team'];
+            allowedTabs = ['dashboard', 'tickets', 'cms', 'team', 'settings'];
           }
 
           setIsLoading(false);
@@ -131,28 +139,40 @@ export default function LoginScreen({ onLogin, teamMembers = [] }) {
           return;
         }
         const lowerRole = (foundTeam.role || '').toLowerCase().trim();
+        const lowerDept = (foundTeam.department || '').toLowerCase().trim();
         const isAdmin =
           cleanEmail.startsWith('admin@') ||
           cleanEmail === 'admin@albazzam.com' ||
           lowerRole === 'admin' ||
           lowerRole === 'administrator' ||
-          lowerRole === 'super admin';
+          lowerRole === 'staff director' ||
+          lowerDept === 'admin' ||
+          lowerRole === 'super admin' ||
+          lowerRole === 'system administrator';
 
-        const isSupport =
-          !isAdmin &&
-          (cleanEmail.startsWith('support@') ||
-            cleanEmail.startsWith('helpdesk@') ||
-            lowerRole === 'it_support' ||
-            lowerRole === 'helpdesk specialist');
+        const isITDept =
+          lowerDept === 'it' ||
+          lowerDept === 'it department' ||
+          lowerDept.includes('it department') ||
+          lowerDept.startsWith('it') ||
+          lowerRole.includes('it support') ||
+          lowerRole.includes('software engineer') ||
+          lowerRole.includes('it admin') ||
+          lowerRole.includes('helpdesk') ||
+          cleanEmail.startsWith('support@') ||
+          cleanEmail.startsWith('helpdesk@') ||
+          lowerRole === 'it_support';
+
+        const isSupport = !isAdmin && isITDept;
 
         let assignedRole = 'employee';
-        let allowedTabs = ['portal', 'tickets'];
+        let allowedTabs = ['portal', 'tickets', 'facilities'];
         if (isAdmin) {
           assignedRole = 'admin';
-          allowedTabs = ['dashboard', 'tickets', 'cms', 'team', 'settings'];
+          allowedTabs = ['dashboard', 'tickets', 'facilities', 'cms', 'team', 'settings'];
         } else if (isSupport) {
           assignedRole = 'it_support';
-          allowedTabs = ['dashboard', 'tickets', 'cms', 'team'];
+          allowedTabs = ['dashboard', 'tickets', 'facilities', 'cms', 'team', 'settings'];
         }
 
         setIsLoading(false);

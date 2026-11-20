@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   ChevronRight
 } from 'lucide-react';
+import { formatWhatsAppListTimestamp } from '../../utils/dateGrouping';
 
 export default function EmployeePortal({
   currentUser,
@@ -134,7 +135,7 @@ export default function EmployeePortal({
                     {ticket.subject}
                   </h4>
                   <div className="text-xs text-neutral-500 dark:text-neutral-400 font-mono">
-                    Assigned to: <strong className="text-neutral-800 dark:text-neutral-200">{ticket.assignee?.name || 'IT Support Team'}</strong> • Updated {ticket.updatedAt}
+                    Assigned to: <strong className="text-neutral-800 dark:text-neutral-200">{ticket.assignee?.name || 'IT Support Team'}</strong> • Updated {formatWhatsAppListTimestamp(ticket.updated_at || ticket.created_at || ticket.updatedAt, ticket.created_at)}
                   </div>
                 </div>
 

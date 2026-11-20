@@ -23,6 +23,22 @@ export default function Header({
   const [showNotifications, setShowNotifications] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
 
+  const isITDept = (user) => {
+    if (!user) return false;
+    const d = (user.department || '').toLowerCase().trim();
+    const r = (user.role || '').toLowerCase().trim();
+    return (
+      user.role === 'admin' ||
+      d === 'it' ||
+      d === 'it department' ||
+      d.includes('it department') ||
+      d.startsWith('it') ||
+      r.includes('it') ||
+      r.includes('admin') ||
+      r === 'it_support'
+    );
+  };
+
   const getHeaderDetails = () => {
     switch (activeTab) {
       case 'portal':
@@ -37,8 +53,8 @@ export default function Header({
         };
       case 'tickets':
         return {
-          title: currentUser?.role === 'employee' ? 'My IT & Software Requests' : 'Incident Triage & Diagnostics',
-          subtitle: currentUser?.role === 'employee' ? 'Track live resolution milestones for your requests' : 'Manage software incidents, engineer assignments, and resolution runbooks',
+          title: currentUser?.role === 'employee' && !isITDept(currentUser) ? 'My IT & Software Requests' : 'Incident Triage & Diagnostics',
+          subtitle: currentUser?.role === 'employee' && !isITDept(currentUser) ? 'Track live resolution milestones for your requests' : 'Manage software incidents, engineer assignments, and resolution runbooks',
         };
       case 'cms':
         return {
@@ -54,6 +70,11 @@ export default function Header({
         return {
           title: 'System & Gateway Configuration',
           subtitle: 'REST endpoints, real-time event sync, and organizational rules',
+        };
+      case 'facilities':
+        return {
+          title: 'Staff Facilities & Corporate Space Management',
+          subtitle: 'Conference rooms, flexible hot desks, executive shuttle fleet, and facility maintenance',
         };
       default:
         return {
@@ -141,7 +162,13 @@ export default function Header({
                   {currentUser.name}
                 </span>
                 <span className="text-xs font-mono text-emerald-600 dark:text-emerald-400 uppercase font-semibold block mt-1">
-                  {currentUser.role === 'admin' ? 'Super Admin' : currentUser.role === 'it_support' ? 'IT Support & CMS' : currentUser.role === 'cms_editor' ? 'CMS Editor' : 'Employee'}
+                  {currentUser.role === 'admin'
+                    ? 'Super Admin'
+                    : isITDept(currentUser) || currentUser.role === 'it_support'
+                      ? 'IT Department (Full Access)'
+                      : currentUser.role === 'cms_editor'
+                        ? 'CMS Editor'
+                        : 'Employee'}
                 </span>
               </div>
               <ChevronDown className="w-3.5 h-3.5 text-neutral-400" />

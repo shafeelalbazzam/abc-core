@@ -28,14 +28,19 @@ CREATE TABLE IF NOT EXISTS public.tickets (
 CREATE TABLE IF NOT EXISTS public.services (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   title TEXT NOT NULL,
-  category TEXT DEFAULT 'Core',
+  category TEXT DEFAULT 'Engineering',
   badge TEXT,
+  tagline TEXT,
   description TEXT,
+  image TEXT,
+  images JSONB DEFAULT '[]'::jsonb,
+  subcategories JSONB DEFAULT '[]'::jsonb,
   deliverables JSONB DEFAULT '[]'::jsonb,
   icon TEXT DEFAULT 'Wrench',
-  image TEXT,
+  status TEXT DEFAULT 'Active',
   active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 3. CAREERS TABLE (Website CMS Career Openings)
@@ -87,6 +92,16 @@ ALTER TABLE public.services ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
 ALTER TABLE public.careers ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
 ALTER TABLE public.trusted_partners ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
 ALTER TABLE public.team_members ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
+
+-- Safe column additions for tickets table
+ALTER TABLE public.tickets ADD COLUMN IF NOT EXISTS unread BOOLEAN DEFAULT false;
+
+-- Safe column additions for services table with multiple images and subcategories
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS tagline TEXT;
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS subcategories JSONB DEFAULT '[]'::jsonb;
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active';
+ALTER TABLE public.services ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 -- =========================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
@@ -147,3 +162,109 @@ CREATE POLICY "Public Read Team" ON public.team_members FOR SELECT USING (true);
 CREATE POLICY "Public Insert Team" ON public.team_members FOR INSERT WITH CHECK (true);
 CREATE POLICY "Public Update Team" ON public.team_members FOR UPDATE USING (true);
 CREATE POLICY "Public Delete Team" ON public.team_members FOR DELETE USING (true);
+
+-- =========================================================================
+-- 7. FACILITIES MANAGEMENT TABLES (Spaces, Bookings & Maintenance Work Orders)
+-- =========================================================================
+CREATE TABLE IF NOT EXISTS public.facilities (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  name TEXT NOT NULL,
+  type TEXT DEFAULT 'Meeting Room',
+  building TEXT DEFAULT 'Al Bazzam HQ Tower',
+  floor TEXT DEFAULT '3rd Floor',
+  capacity INTEGER DEFAULT 10,
+  status TEXT DEFAULT 'Available',
+  image TEXT,
+  description TEXT,
+  amenities JSONB DEFAULT '[]'::jsonb,
+  operating_hours TEXT DEFAULT '08:00 AM - 07:00 PM',
+  lead_tech TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.facility_bookings (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  facility_id TEXT,
+  facility_name TEXT NOT NULL,
+  title TEXT NOT NULL,
+  user_name TEXT NOT NULL,
+  user_email TEXT,
+  department TEXT,
+  date TEXT NOT NULL,
+  start_time TEXT NOT NULL,
+  end_time TEXT NOT NULL,
+  attendees INTEGER DEFAULT 1,
+  status TEXT DEFAULT 'Confirmed',
+  amenities_requested JSONB DEFAULT '[]'::jsonb,
+  notes TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS public.facility_requests (
+  id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
+  title TEXT NOT NULL,
+  category TEXT DEFAULT 'HVAC & Cooling',
+  facility_id TEXT,
+  location TEXT NOT NULL,
+  priority TEXT DEFAULT 'Medium',
+  status TEXT DEFAULT 'Requested',
+  requester_name TEXT NOT NULL,
+  requester_dept TEXT,
+  assigned_to TEXT,
+  description TEXT,
+  resolution_notes TEXT,
+  estimated_cost TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- Row Level Security (RLS) for Facilities
+ALTER TABLE public.facilities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.facility_bookings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.facility_requests ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Public Read Facilities" ON public.facilities;
+DROP POLICY IF EXISTS "Public Insert Facilities" ON public.facilities;
+DROP POLICY IF EXISTS "Public Update Facilities" ON public.facilities;
+DROP POLICY IF EXISTS "Public Delete Facilities" ON public.facilities;
+CREATE POLICY "Public Read Facilities" ON public.facilities FOR SELECT USING (true);
+CREATE POLICY "Public Insert Facilities" ON public.facilities FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Facilities" ON public.facilities FOR UPDATE USING (true);
+CREATE POLICY "Public Delete Facilities" ON public.facilities FOR DELETE USING (true);
+
+DROP POLICY IF EXISTS "Public Read Bookings" ON public.facility_bookings;
+DROP POLICY IF EXISTS "Public Insert Bookings" ON public.facility_bookings;
+DROP POLICY IF EXISTS "Public Update Bookings" ON public.facility_bookings;
+DROP POLICY IF EXISTS "Public Delete Bookings" ON public.facility_bookings;
+CREATE POLICY "Public Read Bookings" ON public.facility_bookings FOR SELECT USING (true);
+CREATE POLICY "Public Insert Bookings" ON public.facility_bookings FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Bookings" ON public.facility_bookings FOR UPDATE USING (true);
+CREATE POLICY "Public Delete Bookings" ON public.facility_bookings FOR DELETE USING (true);
+
+DROP POLICY IF EXISTS "Public Read Requests" ON public.facility_requests;
+DROP POLICY IF EXISTS "Public Insert Requests" ON public.facility_requests;
+DROP POLICY IF EXISTS "Public Update Requests" ON public.facility_requests;
+DROP POLICY IF EXISTS "Public Delete Requests" ON public.facility_requests;
+CREATE POLICY "Public Read Requests" ON public.facility_requests FOR SELECT USING (true);
+CREATE POLICY "Public Insert Requests" ON public.facility_requests FOR INSERT WITH CHECK (true);
+CREATE POLICY "Public Update Requests" ON public.facility_requests FOR UPDATE USING (true);
+CREATE POLICY "Public Delete Requests" ON public.facility_requests FOR DELETE USING (true);
+
+-- =========================================================================
+-- 8. SUPABASE REALTIME REPLICATION (For live incident updates & chat)
+-- =========================================================================
+-- Ensure Full Replica Identity so UPDATE and DELETE events broadcast all fields
+ALTER TABLE public.tickets REPLICA IDENTITY FULL;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_publication_tables 
+    WHERE pubname = 'supabase_realtime' 
+    AND schemaname = 'public' 
+    AND tablename = 'tickets'
+  ) THEN
+    ALTER PUBLICATION supabase_realtime ADD TABLE public.tickets;
+  END IF;
+END $$;

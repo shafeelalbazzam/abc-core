@@ -19,17 +19,27 @@ import {
   Check,
   Star,
   UploadCloud,
-  File
+  File,
+  Edit,
+  Trash2
 } from 'lucide-react';
 import { useWindowsModalAlert } from '../../utils/useWindowsModalAlert';
+import { groupMessagesByDate } from '../../utils/dateGrouping';
+import EditTicketModal from './EditTicketModal';
+import ConfirmDialog from '../common/ConfirmDialog';
 
 export default function TicketDetailModal({
   ticket,
+  currentUser,
   onClose,
   onAddReply,
+  onEditReply,
+  onDeleteReply,
   onUpdateStatus,
   onUpdatePriority,
   onUpdateAssignee,
+  onEditTicket,
+  onDeleteTicket,
   teamMembers,
   currentUserRole = 'support', // 'support' | 'employee'
   onAddAttachment
@@ -41,6 +51,32 @@ export default function TicketDetailModal({
   const [resolutionSummary, setResolutionSummary] = useState('');
   const [rating, setRating] = useState(5);
   const [ratingSubmitted, setRatingSubmitted] = useState(false);
+
+  // Edit and Delete Modal States
+  const [isEditing, setIsEditing] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Edit and Delete Individual Note / Message State
+  const [editingNoteId, setEditingNoteId] = useState(null);
+  const [editingNoteText, setEditingNoteText] = useState('');
+  const [noteToDelete, setNoteToDelete] = useState(null);
+
+  // Filter ONLY IT Department staff members for assignment
+  const itStaffMembers = teamMembers.filter((m) => {
+    const dept = (m.department || '').toLowerCase().trim();
+    const role = (m.role || '').toLowerCase().trim();
+    return (
+      dept === 'it' ||
+      dept === 'it department' ||
+      dept.includes('it') ||
+      role.includes('it') ||
+      role.includes('support') ||
+      role.includes('software') ||
+      role.includes('engineer') ||
+      role.includes('admin') ||
+      role.includes('developer')
+    );
+  });
 
   if (!ticket) return null;
 
@@ -70,15 +106,40 @@ export default function TicketDetailModal({
     });
   };
 
+  const getDynamicAuthor = () => {
+    if (currentUser?.name) {
+      if (currentUserRole === 'support') {
+        const deptOrRole = currentUser.department || currentUser.role || 'IT Support';
+        return `${currentUser.name} (${deptOrRole})`;
+      }
+      return currentUser.name;
+    }
+    return currentUserRole === 'support' ? 'IT Support Specialist' : (ticket.requester?.name || 'Requester');
+  };
+
+  const getDynamicRole = () => {
+    if (currentUserRole === 'support') {
+      return currentUser?.role || 'Support Engineer';
+    }
+    return 'Requester';
+  };
+
+  const formatMsgAuthor = (author) => {
+    if (!author || author.includes('Alex Rivera') || author.includes('Alex Rivers')) {
+      return getDynamicAuthor();
+    }
+    return author;
+  };
+
   const handleSend = (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     if (!replyText.trim()) return;
 
     onAddReply(ticket.id, {
-      content: replyText,
+      content: replyText.trim(),
       isInternal: currentUserRole === 'support' ? isInternalNote : false,
-      author: currentUserRole === 'support' ? 'Alex Rivera (IT Support)' : (ticket.requester?.name || 'Requester'),
-      role: currentUserRole === 'support' ? 'Support Engineer' : 'Requester',
+      author: getDynamicAuthor(),
+      role: getDynamicRole(),
       time: 'Just now'
     });
 
@@ -96,8 +157,8 @@ export default function TicketDetailModal({
     onAddReply(ticket.id, {
       content: `✅ RESOLUTION DETAILS:\n${finalNote}`,
       isInternal: false,
-      author: 'Alex Rivera (IT Support)',
-      role: 'Support Engineer',
+      author: getDynamicAuthor(),
+      role: getDynamicRole(),
       time: 'Just now'
     });
 
@@ -191,12 +252,37 @@ export default function TicketDetailModal({
             )}
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded text-neutral-400 hover:text-neutral-800 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsEditing(true)}
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-neutral-100 hover:bg-neutral-200 dark:bg-neutral-800 dark:hover:bg-neutral-700 text-neutral-700 dark:text-neutral-200 text-xs font-mono font-semibold transition-colors border border-neutral-300 dark:border-neutral-700"
+              title="Edit incident details"
+            >
+              <Edit className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              <span>Edit</span>
+            </button>
+
+            {currentUserRole === 'support' && (
+              <button
+                type="button"
+                onClick={() => setIsDeleting(true)}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 text-xs font-mono font-semibold transition-colors"
+                title="Delete this incident"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Delete</span>
+              </button>
+            )}
+
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded text-neutral-400 hover:text-neutral-800 dark:hover:text-white hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors ml-1"
+              title="Close dialog"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Modal Main Split: Ticket Conversation + Sidebar Details */}
@@ -309,28 +395,111 @@ export default function TicketDetailModal({
                 )}
               </div>
 
-              {/* Message Timeline */}
-              {(ticket.replies || ticket.timeline || []).map((reply) => (
-                <div
-                  key={reply.id}
-                  className={`p-4 rounded-lg border space-y-1.5 ${reply.isInternal
-                    ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40 text-amber-950 dark:text-amber-200'
-                    : reply.author.includes('Support')
-                      ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-950 dark:text-emerald-200'
-                      : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 shadow-2xs'
-                    }`}
-                >
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="font-bold text-neutral-900 dark:text-neutral-200 flex items-center gap-2">
-                      {reply.isInternal && <Lock className="w-3.5 h-3.5 text-amber-500" />}
-                      {reply.author}
-                      <span className="text-neutral-500 font-normal">({reply.role})</span>
+              {/* Message Timeline with WhatsApp-style Date Bucketing */}
+              {groupMessagesByDate(ticket.replies || ticket.timeline || [], ticket.created_at || ticket.createdAt).map((group) => (
+                <div key={group.dateKey} className="space-y-3">
+                  {/* WhatsApp Centered Date Divider */}
+                  <div className="flex items-center justify-center my-3">
+                    <span className="px-3 py-1 rounded-full text-[11px] font-mono font-semibold tracking-wide bg-neutral-200/80 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 shadow-2xs border border-neutral-300/60 dark:border-neutral-700/60">
+                      {group.dateLabel}
                     </span>
-                    <span className="text-neutral-500">{reply.time}</span>
                   </div>
-                  <p className="text-sm leading-relaxed whitespace-pre-wrap">
-                    {reply.content}
-                  </p>
+
+                  {/* Messages in this date group */}
+                  {group.messages.map((reply) => {
+                    const isBeingEdited = editingNoteId === reply.id;
+
+                    return (
+                      <div
+                        key={reply.id}
+                        className={`p-4 rounded-lg border space-y-1.5 ${reply.isInternal
+                          ? 'bg-amber-50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-800/40 text-amber-950 dark:text-amber-200'
+                          : reply.author?.includes('Support')
+                            ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40 text-emerald-950 dark:text-emerald-200'
+                            : 'bg-white dark:bg-neutral-900 border-neutral-200 dark:border-neutral-800 text-neutral-800 dark:text-neutral-200 shadow-2xs'
+                          }`}
+                      >
+                        <div className="flex items-center justify-between text-xs font-mono">
+                          <span className="font-bold text-neutral-900 dark:text-neutral-200 flex items-center gap-2">
+                            {reply.isInternal && <Lock className="w-3.5 h-3.5 text-amber-500" />}
+                            {formatMsgAuthor(reply.author)}
+                            <span className="text-neutral-500 font-normal">({reply.role})</span>
+                            {reply.edited && (
+                              <span className="text-[10px] text-neutral-400 italic font-normal">(edited)</span>
+                            )}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-neutral-500">{reply.formattedTime || reply.time}</span>
+                            {currentUserRole === 'support' && !isBeingEdited && (
+                              <div className="flex items-center gap-1 opacity-70 hover:opacity-100 transition-opacity">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingNoteId(reply.id);
+                                    setEditingNoteText(reply.content);
+                                  }}
+                                  className="p-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-500 hover:text-emerald-600 transition-colors"
+                                  title="Edit note"
+                                >
+                                  <Edit className="w-3.5 h-3.5" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setNoteToDelete({ ticketId: ticket.id, noteId: reply.id })}
+                                  className="p-1 rounded hover:bg-neutral-200 dark:hover:bg-neutral-800 text-neutral-500 hover:text-rose-600 transition-colors"
+                                  title="Delete note"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {isBeingEdited ? (
+                          <div className="space-y-2 pt-1">
+                            <textarea
+                              rows={3}
+                              value={editingNoteText}
+                              onChange={(e) => setEditingNoteText(e.target.value)}
+                              className="w-full text-xs font-sans p-2 rounded border border-neutral-300 dark:border-neutral-700 bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                              autoFocus
+                            />
+                            <div className="flex items-center justify-end gap-2">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setEditingNoteId(null);
+                                  setEditingNoteText('');
+                                }}
+                                className="px-2.5 py-1 text-xs rounded border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800 text-neutral-600 dark:text-neutral-300 font-mono font-medium"
+                              >
+                                Cancel
+                              </button>
+                              <button
+                                type="button"
+                                disabled={!editingNoteText.trim()}
+                                onClick={() => {
+                                  if (editingNoteText.trim() && onEditReply) {
+                                    onEditReply(ticket.id, reply.id, editingNoteText.trim());
+                                  }
+                                  setEditingNoteId(null);
+                                  setEditingNoteText('');
+                                }}
+                                className="px-2.5 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white font-mono font-bold disabled:opacity-50"
+                              >
+                                Save Note
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <p className="text-sm leading-relaxed whitespace-pre-wrap">
+                            {reply.content}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
               ))}
             </div>
@@ -356,34 +525,47 @@ export default function TicketDetailModal({
                   )}
                 </div>
 
-                <textarea
-                  rows={3}
-                  value={replyText}
-                  onChange={(e) => setReplyText(e.target.value)}
-                  placeholder="Type your response here..."
-                  className="w-full p-3 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-sm text-neutral-900 dark:text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-neutral-700 leading-relaxed"
-                />
-
-                <div className="flex items-center justify-between pt-1">
-                  <div className="flex items-center gap-2">
-                    {currentUserRole === 'support' && (
-                      <button
-                        type="button"
-                        onClick={() => handleCannedResponse(playbook.quickFix)}
-                        className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline font-mono font-semibold"
-                      >
-                        + Insert Playbook Fix
-                      </button>
-                    )}
-                  </div>
+                <div className="relative flex items-center bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded-lg focus-within:border-emerald-500 dark:focus-within:border-emerald-500 transition-colors p-1.5 pr-2 gap-2 shadow-2xs">
+                  <textarea
+                    rows={2}
+                    value={replyText}
+                    onChange={(e) => setReplyText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSend(e);
+                      }
+                    }}
+                    placeholder="Type response here (Enter to send)..."
+                    className="flex-1 bg-transparent border-0 p-2 text-sm text-neutral-900 dark:text-neutral-200 placeholder-neutral-500 focus:outline-none resize-none font-sans min-h-[46px] max-h-32"
+                  />
 
                   <button
                     type="submit"
-                    className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-xs"
+                    disabled={!replyText.trim()}
+                    className={`px-3 py-2.5 rounded-md flex items-center justify-center gap-1.5 text-xs font-bold transition-all shrink-0 self-end mb-0.5 ${replyText.trim()
+                      ? 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-xs cursor-pointer'
+                      : 'bg-neutral-200 dark:bg-neutral-800 text-neutral-400 dark:text-neutral-600 cursor-not-allowed'
+                      }`}
+                    title="Press Enter to send (or click here)"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Send Reply</span>
+                    <Send className="w-4 h-4" />
+                    <span className="hidden sm:inline">Send</span>
                   </button>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-neutral-400 font-mono px-1">
+                  <span>Press <kbd className="px-1 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 text-[10px]">Enter ↵</kbd> to send • <kbd className="px-1 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 border border-neutral-300 dark:border-neutral-700 text-neutral-600 dark:text-neutral-400 text-[10px]">Shift+Enter</kbd> for new line</span>
+
+                  {currentUserRole === 'support' && (
+                    <button
+                      type="button"
+                      onClick={() => handleCannedResponse(playbook.quickFix)}
+                      className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline font-mono font-semibold"
+                    >
+                      + Insert Playbook Fix
+                    </button>
+                  )}
                 </div>
               </form>
             </div>
@@ -417,20 +599,26 @@ export default function TicketDetailModal({
               </p>
             </div>
 
-            {/* Assignee Control */}
+            {/* Assignee Control (IT Department Personnel Only) */}
             {currentUserRole === 'support' && (
               <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-4 bg-white dark:bg-neutral-950 space-y-2 shadow-2xs">
-                <span className="text-xs font-mono font-bold uppercase text-neutral-500 dark:text-neutral-400 block">
-                  Assigned Engineer
-                </span>
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-mono font-bold uppercase text-neutral-500 dark:text-neutral-400 block">
+                    Assigned Engineer
+                  </span>
+                  <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-semibold">
+                    IT Dept Only
+                  </span>
+                </div>
                 <select
-                  value={ticket.assignee.id}
+                  value={ticket.assignee?.name || ticket.assignee?.id || ''}
                   onChange={(e) => onUpdateAssignee(ticket.id, e.target.value)}
                   className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-xs font-mono text-neutral-800 dark:text-neutral-200 focus:outline-none"
                 >
-                  {teamMembers.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name} ({m.role})
+                  <option value="">Unassigned (IT Support Pool)</option>
+                  {itStaffMembers.map((m) => (
+                    <option key={m.id} value={m.name}>
+                      {m.name} ({m.role || 'IT Support'})
                     </option>
                   ))}
                 </select>
@@ -439,6 +627,55 @@ export default function TicketDetailModal({
           </div>
         </div>
       </div>
+
+      {/* Edit Ticket Modal */}
+      <EditTicketModal
+        isOpen={isEditing}
+        ticket={ticket}
+        onClose={() => setIsEditing(false)}
+        onSave={(updatedTicket) => {
+          if (onEditTicket) onEditTicket(updatedTicket);
+          setIsEditing(false);
+        }}
+        teamMembers={teamMembers}
+      />
+
+      {/* Confirm Delete Incident Dialog */}
+      <ConfirmDialog
+        isOpen={isDeleting}
+        title="Delete Incident"
+        message={`Are you sure you want to permanently delete incident "${ticket.id}: ${ticket.subject || ticket.title}"? All conversation messages and attachments will be deleted.`}
+        confirmText="Delete Incident"
+        cancelText="Cancel"
+        icon="trash"
+        variant="danger"
+        onConfirm={() => {
+          if (onDeleteTicket) {
+            onDeleteTicket(ticket.id);
+            setIsDeleting(false);
+            onClose();
+          }
+        }}
+        onCancel={() => setIsDeleting(false)}
+      />
+
+      {/* Confirm Delete Note / Response Dialog */}
+      <ConfirmDialog
+        isOpen={!!noteToDelete}
+        title="Delete Incident Note"
+        message="Are you sure you want to delete this incident note / response? This action cannot be undone."
+        confirmText="Delete Note"
+        cancelText="Cancel"
+        icon="trash"
+        variant="danger"
+        onConfirm={() => {
+          if (noteToDelete && onDeleteReply) {
+            onDeleteReply(noteToDelete.ticketId, noteToDelete.noteId);
+          }
+          setNoteToDelete(null);
+        }}
+        onCancel={() => setNoteToDelete(null)}
+      />
     </div>
   );
 }

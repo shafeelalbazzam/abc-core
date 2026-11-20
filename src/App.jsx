@@ -30,12 +30,15 @@ import {
   initialCareers,
   initialTrustedPartners
 } from './data/mockData';
-import { demoUsers } from './data/authUsers';
+
 import { isSupabaseConfigured } from './lib/supabaseClient';
+import { broadcastIncidentEvent, subscribeToIncidentBus } from './utils/realtimeBus';
 import {
   fetchTicketsFromSupabase,
   syncTicketToSupabase,
   deleteTicketFromSupabase,
+  updateTicketUnreadStatusInSupabase,
+  subscribeToTicketsRealtime,
   fetchServicesFromSupabase,
   syncServiceToSupabase,
   deleteServiceFromSupabase,
@@ -61,8 +64,24 @@ export default function App() {
     }
   });
 
+  const isITDept = (user) => {
+    if (!user) return false;
+    const d = (user.department || '').toLowerCase().trim();
+    const r = (user.role || '').toLowerCase().trim();
+    return (
+      user.role === 'admin' ||
+      d === 'it' ||
+      d === 'it department' ||
+      d.includes('it department') ||
+      d.startsWith('it') ||
+      r.includes('it') ||
+      r.includes('admin') ||
+      r === 'it_support'
+    );
+  };
+
   const [activeTab, setActiveTab] = useState(() => {
-    return currentUser?.role === 'employee' ? 'portal' : 'dashboard';
+    return currentUser?.role === 'employee' && !isITDept(currentUser) ? 'portal' : 'dashboard';
   });
 
   const [cmsSubTab, setCmsSubTab] = useState('services');
@@ -111,14 +130,55 @@ export default function App() {
     }
   }, [theme]);
 
-  // Ensure non-employee accounts (Admin & IT Support) cannot stay on or navigate to employee portal
+  // Ensure non-employee accounts (Admin & IT Support / IT Department) cannot stay on or navigate to employee portal
   useEffect(() => {
-    if (currentUser?.role && currentUser.role !== 'employee' && activeTab === 'portal') {
+    if (currentUser && (currentUser.role !== 'employee' || isITDept(currentUser)) && activeTab === 'portal') {
       setActiveTab('dashboard');
     }
   }, [currentUser, activeTab]);
 
-  // Initial load from Supabase if configured
+  // Track Supabase configuration version
+  const [supabaseVersion, setSupabaseVersion] = useState(0);
+  const [isRefreshingTickets, setIsRefreshingTickets] = useState(false);
+
+  useEffect(() => {
+    const handleConfigChange = () => setSupabaseVersion((v) => v + 1);
+    window.addEventListener('abc_supabase_config_changed', handleConfigChange);
+    window.addEventListener('storage', handleConfigChange);
+    return () => {
+      window.removeEventListener('abc_supabase_config_changed', handleConfigChange);
+      window.removeEventListener('storage', handleConfigChange);
+    };
+  }, []);
+
+  // Cross-tab / cross-window instant Realtime bus listener
+  useEffect(() => {
+    const unsubscribeBus = subscribeToIncidentBus((event) => {
+      if (!event || !event.type) return;
+      if (event.type === 'TICKET_INSERT' && event.data) {
+        setTickets((prev) => {
+          if (prev.some((t) => t.id === event.data.id)) return prev;
+          return [event.data, ...prev];
+        });
+      } else if (event.type === 'TICKET_UPDATE' && event.data) {
+        setTickets((prev) =>
+          prev.map((t) => (t.id === event.data.id ? { ...t, ...event.data } : t))
+        );
+        setSelectedTicket((current) =>
+          current && current.id === event.data.id ? { ...current, ...event.data } : current
+        );
+      } else if (event.type === 'TICKET_DELETE' && event.data) {
+        setTickets((prev) => prev.filter((t) => t.id !== event.data));
+        setSelectedTicket((current) => (current && current.id === event.data ? null : current));
+      }
+    });
+
+    return () => {
+      if (unsubscribeBus) unsubscribeBus();
+    };
+  }, []);
+
+  // Main load from Supabase and Realtime subscription
   useEffect(() => {
     if (!isSupabaseConfigured()) return;
 
@@ -149,7 +209,87 @@ export default function App() {
     };
 
     loadSupabaseData();
-  }, []);
+
+    // Subscribe to live Realtime updates from Supabase
+    const unsubscribe = subscribeToTicketsRealtime({
+      onInsert: (newTicket) => {
+        setTickets((prev) => {
+          if (prev.some((t) => t.id === newTicket.id)) return prev;
+          return [newTicket, ...prev];
+        });
+      },
+      onUpdate: (updatedTicket) => {
+        setTickets((prev) =>
+          prev.map((t) => (t.id === updatedTicket.id ? { ...t, ...updatedTicket } : t))
+        );
+        setSelectedTicket((current) =>
+          current && current.id === updatedTicket.id ? { ...current, ...updatedTicket } : current
+        );
+      },
+      onDelete: (deletedId) => {
+        setTickets((prev) => prev.filter((t) => t.id !== deletedId));
+        setSelectedTicket((current) => (current && current.id === deletedId ? null : current));
+      }
+    });
+
+    // Background interval sync every 8 seconds as resilient fallback
+    const interval = setInterval(async () => {
+      try {
+        const remote = await fetchTicketsFromSupabase();
+        if (remote && Array.isArray(remote) && remote.length > 0) {
+          setTickets((prev) => {
+            const remoteMap = new Map(remote.map((r) => [r.id, r]));
+            let changed = false;
+            const updated = prev.map((local) => {
+              const r = remoteMap.get(local.id);
+              if (r) {
+                remoteMap.delete(local.id);
+                const localLen = (local.timeline || local.replies || []).length;
+                const remoteLen = (r.timeline || r.replies || []).length;
+                if (localLen !== remoteLen || local.status !== r.status || local.updated_at !== r.updated_at || local.isUnread !== r.isUnread) {
+                  changed = true;
+                  return { ...local, ...r };
+                }
+                return local;
+              }
+              return local;
+            });
+            if (remoteMap.size > 0) {
+              changed = true;
+              return [...remoteMap.values(), ...updated];
+            }
+            return changed ? updated : prev;
+          });
+        }
+      } catch { }
+    }, 8000);
+
+    return () => {
+      if (unsubscribe) unsubscribe();
+      clearInterval(interval);
+    };
+  }, [supabaseVersion]);
+
+  const handleRefreshTickets = async () => {
+    setIsRefreshingTickets(true);
+    try {
+      if (isSupabaseConfigured()) {
+        const remote = await fetchTicketsFromSupabase();
+        if (remote && remote.length > 0) {
+          setTickets(remote);
+          showToast({ type: 'success', message: 'Incidents synchronized with Supabase.' });
+        } else {
+          showToast({ type: 'info', message: 'Incidents up to date.' });
+        }
+      } else {
+        showToast({ type: 'info', message: 'Operating in local realtime mode.' });
+      }
+    } catch (e) {
+      showToast({ type: 'error', message: 'Sync failed: ' + e.message });
+    } finally {
+      setIsRefreshingTickets(false);
+    }
+  };
 
   const showToast = (toastData) => {
     const payload = typeof toastData === 'object' ? toastData : { message: toastData };
@@ -199,15 +339,35 @@ export default function App() {
 
   // Ticket Handlers
   const handleToggleReadTicket = (ticketId, forcedStatus) => {
-    setTickets((prev) =>
-      prev.map((t) => {
+    let targetNextStatus = false;
+    setTickets((prev) => {
+      const updated = prev.map((t) => {
         if (t.id === ticketId) {
-          const nextStatus = forcedStatus !== undefined ? forcedStatus : !t.isUnread;
-          return { ...t, isUnread: nextStatus };
+          targetNextStatus = forcedStatus !== undefined ? Boolean(forcedStatus) : !t.isUnread;
+          return { ...t, isUnread: targetNextStatus, unread: targetNextStatus };
         }
         return t;
-      })
-    );
+      });
+
+      // 1. Immediately cache to localStorage so it survives page reloads
+      try {
+        const cached = JSON.parse(localStorage.getItem('abc_unread_tickets') || '{}');
+        cached[ticketId] = targetNextStatus;
+        localStorage.setItem('abc_unread_tickets', JSON.stringify(cached));
+      } catch (e) {
+        console.warn('Could not cache unread state:', e);
+      }
+
+      // 2. Persist to Supabase database
+      updateTicketUnreadStatusInSupabase(ticketId, targetNextStatus);
+
+      const targetTicket = updated.find((t) => t.id === ticketId);
+      if (targetTicket) {
+        broadcastIncidentEvent('TICKET_UPDATE', targetTicket);
+      }
+
+      return updated;
+    });
   };
 
   const handleSelectTicket = (ticket) => {
@@ -220,6 +380,7 @@ export default function App() {
 
   const handleCreateTicket = (formData) => {
     const newId = `TICK-${1040 + tickets.length + 1}`;
+    const matchedAssignee = teamMembers.find((m) => m.name === formData.assigneeName);
     const newTicket = {
       id: newId,
       subject: formData.subject,
@@ -232,13 +393,22 @@ export default function App() {
       category: formData.category,
       priority: formData.priority,
       status: 'Open',
-      assignee: {
-        name: 'Marcus Chen',
-        email: 'marcus.c@company.com',
-        avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&h=100&fit=crop&crop=faces',
-      },
-      createdAt: 'Just now',
+      assigned_to: formData.assigneeName || '',
+      assignee: formData.assigneeName
+        ? {
+          name: formData.assigneeName,
+          email: matchedAssignee?.email || 'support@albazzam.com',
+          avatar: matchedAssignee?.avatar || 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&h=100&fit=crop&crop=faces',
+        }
+        : {
+          name: 'IT Support Team',
+          email: 'support@albazzam.com',
+          avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&h=100&fit=crop&crop=faces',
+        },
+      createdAt: new Date().toLocaleDateString(),
       updatedAt: 'Just now',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
       slaDue: formData.priority === 'Urgent' ? 'in 58 mins' : 'in 4 hours',
       tags: formData.tags || [],
       description: formData.description,
@@ -249,7 +419,8 @@ export default function App() {
           author: formData.requesterName,
           role: 'Requester',
           type: 'message',
-          time: 'Just now',
+          time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          timestamp: new Date().toISOString(),
           content: formData.description,
         }
       ]
@@ -257,6 +428,7 @@ export default function App() {
 
     setTickets([newTicket, ...tickets]);
     syncTicketToSupabase(newTicket);
+    broadcastIncidentEvent('TICKET_INSERT', newTicket);
     setMetrics((prev) => ({
       ...prev,
       activeTickets: prev.activeTickets + 1,
@@ -266,12 +438,37 @@ export default function App() {
   };
 
   const handleAddReply = (ticketId, reply) => {
+    const isAlexStatic = !reply.author || reply.author.includes('Alex Rivera') || reply.author.includes('Alex Rivers');
+    const dynamicAuthor = isAlexStatic
+      ? (currentUser?.name
+          ? (currentUser.role === 'admin' || currentUser.role === 'it_support' || isITDept(currentUser)
+              ? `${currentUser.name} (${currentUser.department || 'IT Support'})`
+              : currentUser.name)
+          : 'IT Support Specialist')
+      : reply.author;
+
+    const dynamicRole = isAlexStatic
+      ? (currentUser?.role === 'employee' && !isITDept(currentUser) ? 'Requester' : (currentUser?.role || 'Support Engineer'))
+      : (reply.role || 'Support Engineer');
+
     const updated = tickets.map((t) => {
       if (t.id === ticketId) {
+        const newMsg = {
+          ...reply,
+          author: dynamicAuthor,
+          role: dynamicRole,
+          id: reply.id || Date.now(),
+          timestamp: reply.timestamp || new Date().toISOString(),
+          time: reply.time || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+        };
+        const nextTimeline = [...(t.timeline || t.replies || []), newMsg];
         return {
           ...t,
           updatedAt: 'Just now',
-          timeline: [...(t.timeline || []), { ...reply, id: Date.now() }],
+          updated_at: new Date().toISOString(),
+          timeline: nextTimeline,
+          replies: nextTimeline,
+          conversation: nextTimeline
         };
       }
       return t;
@@ -281,11 +478,76 @@ export default function App() {
     const updatedTicket = updated.find((t) => t.id === ticketId);
     if (updatedTicket) {
       syncTicketToSupabase(updatedTicket);
+      broadcastIncidentEvent('TICKET_UPDATE', updatedTicket);
     }
     if (selectedTicket && selectedTicket.id === ticketId) {
       setSelectedTicket(updatedTicket);
     }
     showToast(reply.isInternal ? 'Internal staff note saved.' : 'Message sent successfully.');
+  };
+
+  const handleEditReply = (ticketId, replyId, updatedContent) => {
+    const updated = tickets.map((t) => {
+      if (t.id === ticketId) {
+        const updateReplies = (list) =>
+          (list || []).map((msg) =>
+            msg.id === replyId
+              ? { ...msg, content: updatedContent, edited: true, editedAt: new Date().toISOString() }
+              : msg
+          );
+        const nextTimeline = updateReplies(t.timeline || t.replies || t.conversation);
+        return {
+          ...t,
+          updated_at: new Date().toISOString(),
+          updatedAt: 'Just now',
+          timeline: nextTimeline,
+          replies: nextTimeline,
+          conversation: nextTimeline,
+        };
+      }
+      return t;
+    });
+
+    setTickets(updated);
+    const updatedTicket = updated.find((t) => t.id === ticketId);
+    if (updatedTicket) {
+      syncTicketToSupabase(updatedTicket);
+      broadcastIncidentEvent('TICKET_UPDATE', updatedTicket);
+    }
+    if (selectedTicket && selectedTicket.id === ticketId) {
+      setSelectedTicket(updatedTicket);
+    }
+    showToast('Note / response updated.');
+  };
+
+  const handleDeleteReply = (ticketId, replyId) => {
+    const updated = tickets.map((t) => {
+      if (t.id === ticketId) {
+        const filterReplies = (list) =>
+          (list || []).filter((msg) => msg.id !== replyId);
+        const nextTimeline = filterReplies(t.timeline || t.replies || t.conversation);
+        return {
+          ...t,
+          updated_at: new Date().toISOString(),
+          updatedAt: 'Just now',
+          timeline: nextTimeline,
+          replies: nextTimeline,
+          conversation: nextTimeline,
+        };
+      }
+      return t;
+    });
+
+    setTickets(updated);
+    const updatedTicket = updated.find((t) => t.id === ticketId);
+    if (updatedTicket) {
+      syncTicketToSupabase(updatedTicket);
+      broadcastIncidentEvent('TICKET_UPDATE', updatedTicket);
+    }
+    if (selectedTicket && selectedTicket.id === ticketId) {
+      setSelectedTicket(updatedTicket);
+    }
+    showToast('Note / response deleted.');
   };
 
   const handleUpdateTicketStatus = (ticketId, newStatus) => {
@@ -299,6 +561,7 @@ export default function App() {
     const updatedTicket = updated.find((t) => t.id === ticketId);
     if (updatedTicket) {
       syncTicketToSupabase(updatedTicket);
+      broadcastIncidentEvent('TICKET_UPDATE', updatedTicket);
     }
     if (selectedTicket && selectedTicket.id === ticketId) {
       setSelectedTicket({ ...selectedTicket, status: newStatus });
@@ -317,6 +580,7 @@ export default function App() {
     const updatedTicket = updated.find((t) => t.id === ticketId);
     if (updatedTicket) {
       syncTicketToSupabase(updatedTicket);
+      broadcastIncidentEvent('TICKET_UPDATE', updatedTicket);
     }
     if (selectedTicket && selectedTicket.id === ticketId) {
       setSelectedTicket({ ...selectedTicket, priority: newPriority });
@@ -346,6 +610,7 @@ export default function App() {
     const updatedTicket = updated.find((t) => t.id === ticketId);
     if (updatedTicket) {
       syncTicketToSupabase(updatedTicket);
+      broadcastIncidentEvent('TICKET_UPDATE', updatedTicket);
     }
     if (selectedTicket && selectedTicket.id === ticketId) {
       setSelectedTicket(updatedTicket);
@@ -369,8 +634,45 @@ export default function App() {
     const updatedTicket = updated.find((t) => t.id === ticketId);
     if (updatedTicket) {
       syncTicketToSupabase(updatedTicket);
+      broadcastIncidentEvent('TICKET_UPDATE', updatedTicket);
     }
     showToast(`Attached file "${attachment.name}" to ticket ${ticketId}`);
+  };
+
+  const handleEditTicket = (updatedTicket) => {
+    const updated = tickets.map((t) => (t.id === updatedTicket.id ? { ...t, ...updatedTicket, updatedAt: 'Just now' } : t));
+    setTickets(updated);
+    syncTicketToSupabase({ ...updatedTicket, updatedAt: new Date().toISOString() });
+    broadcastIncidentEvent('TICKET_UPDATE', updatedTicket);
+    if (selectedTicket && selectedTicket.id === updatedTicket.id) {
+      setSelectedTicket({ ...selectedTicket, ...updatedTicket });
+    }
+    showToast(`Incident ${updatedTicket.id} updated successfully.`);
+  };
+
+  const handleDeleteTicket = (ticketId) => {
+    setTickets((prev) => prev.filter((t) => t.id !== ticketId));
+    deleteTicketFromSupabase(ticketId);
+    broadcastIncidentEvent('TICKET_DELETE', ticketId);
+    try {
+      const cached = JSON.parse(localStorage.getItem('abc_unread_tickets') || '{}');
+      if (ticketId in cached) {
+        delete cached[ticketId];
+        localStorage.setItem('abc_unread_tickets', JSON.stringify(cached));
+      }
+    } catch { }
+    if (selectedTicket && selectedTicket.id === ticketId) {
+      setSelectedTicket(null);
+    }
+    setMetrics((prev) => ({
+      ...prev,
+      activeTickets: Math.max(0, prev.activeTickets - 1)
+    }));
+    showToast({
+      type: 'info',
+      title: 'Incident Deleted',
+      message: `Incident ${ticketId} has been permanently deleted.`
+    });
   };
 
   // CMS Services Handlers
@@ -546,7 +848,7 @@ export default function App() {
   // Filter tickets:
   // Admin and IT Support triage staff can view all organizational tickets.
   // Standard employees strictly and exclusively see only tickets they requested.
-  const isQueueStaff = currentUser?.role === 'admin' || currentUser?.role === 'it_support';
+  const isQueueStaff = currentUser?.role === 'admin' || currentUser?.role === 'it_support' || isITDept(currentUser);
 
   const userTickets = !isQueueStaff
     ? tickets.filter((t) => {
@@ -620,8 +922,8 @@ export default function App() {
 
         {/* View Container */}
         <main className="flex-1 overflow-hidden relative">
-          {/* Employee Self-Service Portal View (Accessible by Employee only) */}
-          {activeTab === 'portal' && currentUser.role === 'employee' && (
+          {/* Employee Self-Service Portal View (Accessible by non-IT Employee only) */}
+          {activeTab === 'portal' && currentUser.role === 'employee' && !isITDept(currentUser) && (
             <EmployeePortal
               currentUser={currentUser}
               myTickets={userTickets}
@@ -636,19 +938,26 @@ export default function App() {
           {activeTab === 'tickets' && (
             <TicketManagement
               tickets={userTickets}
+              currentUser={currentUser}
               onSelectTicket={handleSelectTicket}
               onOpenCreateTicket={() => setIsCreateTicketOpen(true)}
               onUpdateTicketStatus={handleUpdateTicketStatus}
+              onEditTicket={handleEditTicket}
+              onDeleteTicket={handleDeleteTicket}
               teamMembers={teamMembers}
-              currentUserRole={currentUser.role === 'employee' ? 'employee' : 'support'}
+              currentUserRole={isQueueStaff ? 'support' : 'employee'}
               onAddReply={handleAddReply}
+              onEditReply={handleEditReply}
+              onDeleteReply={handleDeleteReply}
               onAddAttachment={handleAddAttachment}
               onToggleReadTicket={handleToggleReadTicket}
+              onRefreshTickets={handleRefreshTickets}
+              isRefreshingTickets={isRefreshingTickets}
             />
           )}
 
-          {/* Overview Dashboard (Accessible by Admin, IT Support, CMS Editor) */}
-          {activeTab === 'dashboard' && currentUser.role !== 'employee' && (
+          {/* Overview Dashboard (Accessible by Admin, IT Support, CMS Editor, IT Department) */}
+          {activeTab === 'dashboard' && (currentUser.role !== 'employee' || isITDept(currentUser)) && (
             <OverviewDashboard
               metrics={metrics}
               tickets={tickets}
@@ -664,8 +973,8 @@ export default function App() {
             />
           )}
 
-          {/* CMS Management (Accessible by Admin, IT Support, and CMS Editor) */}
-          {activeTab === 'cms' && (currentUser.role === 'admin' || currentUser.role === 'it_support' || currentUser.role === 'cms_editor') && (
+          {/* CMS Management (Accessible by Admin, IT Support, CMS Editor, and IT Department) */}
+          {activeTab === 'cms' && (currentUser.role === 'admin' || currentUser.role === 'it_support' || currentUser.role === 'cms_editor' || isITDept(currentUser)) && (
             <CmsManagement
               activeSubTab={cmsSubTab}
               setActiveSubTab={setCmsSubTab}
@@ -684,8 +993,8 @@ export default function App() {
             />
           )}
 
-          {/* Team Management (Accessible by Admin & IT Support) */}
-          {activeTab === 'team' && (currentUser.role === 'admin' || currentUser.role === 'it_support') && (
+          {/* Team Management (Accessible by Admin, IT Support, and IT Department) */}
+          {activeTab === 'team' && (currentUser.role === 'admin' || currentUser.role === 'it_support' || isITDept(currentUser)) && (
             <TeamManagement
               teamMembers={teamMembers}
               onAddMember={handleAddTeamMember}
@@ -694,14 +1003,16 @@ export default function App() {
             />
           )}
 
-          {/* Settings View (Accessible by Admin ONLY) */}
-          {activeTab === 'settings' && currentUser.role === 'admin' && (
+          {/* Settings View (Accessible by Admin and IT Department) */}
+          {activeTab === 'settings' && (currentUser.role === 'admin' || isITDept(currentUser)) && (
             <SettingsView
               theme={theme}
               setTheme={setTheme}
               onShowToast={showToast}
             />
           )}
+
+
         </main>
       </div>
 
@@ -709,13 +1020,18 @@ export default function App() {
       {selectedTicket && (
         <TicketDetailModal
           ticket={selectedTicket}
+          currentUser={currentUser}
           onClose={() => setSelectedTicket(null)}
           onAddReply={handleAddReply}
+          onEditReply={handleEditReply}
+          onDeleteReply={handleDeleteReply}
           onUpdateStatus={handleUpdateTicketStatus}
           onUpdatePriority={handleUpdateTicketPriority}
           onUpdateAssignee={handleUpdateTicketAssignee}
+          onEditTicket={handleEditTicket}
+          onDeleteTicket={handleDeleteTicket}
           teamMembers={teamMembers}
-          currentUserRole={currentUser.role === 'employee' ? 'employee' : 'support'}
+          currentUserRole={isQueueStaff ? 'support' : 'employee'}
           onAddAttachment={handleAddAttachment}
         />
       )}
@@ -735,6 +1051,7 @@ export default function App() {
         onClose={() => setIsCreateTicketOpen(false)}
         onCreateTicket={handleCreateTicket}
         currentUser={currentUser}
+        teamMembers={teamMembers}
       />
 
       <QuickSearchModal

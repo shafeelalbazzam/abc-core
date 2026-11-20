@@ -48,10 +48,12 @@ export default function TeamManagement({
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordError, setPasswordError] = useState('');
   const [emailError, setEmailError] = useState('');
+  const [adminError, setAdminError] = useState('');
   const [isCheckingEmail, setIsCheckingEmail] = useState(false);
 
-  // Departments
-  const departments = [
+  // All Standard Departments
+  const allDepartments = [
+    'Admin',
     'IT Department',
     'Finance & Accounts',
     'HR',
@@ -60,33 +62,62 @@ export default function TeamManagement({
 
   // Role Category mapping per Department
   const departmentRoles = {
+    'Admin': [
+      'Admin',
+      'Staff Director'
+    ],
     'IT Department': [
       'IT Support Lead',
-      'DevOps & SysAdmin',
       'Software Engineer',
-      'Helpdesk Specialist',
-      'Network Administrator',
-      'Cybersecurity Analyst'
+      'IT Admin',
+      'Both Above'
     ],
     'Finance & Accounts': [
       'Finance Manager',
-      'Senior Accountant',
-      'Accounts Officer',
-      'Financial Analyst',
-      'Billing & Payroll Specialist'
+      'Senior Accountant'
     ],
     'HR': [
-      'HR Director',
-      'HR Generalist',
-      'Talent Acquisition Specialist',
-      'HR Operations Coordinator'
+      'HR Director'
     ],
     'Facilities Management': [
       'Facilities Operations Manager',
-      'Infrastructure Supervisor',
-      'Maintenance Coordinator',
-      'Safety & Security Officer'
+      'Client Relations & Support'
     ]
+  };
+
+  // Helper functions to identify Admin accounts
+  const isMemberAdmin = (m) => {
+    if (!m) return false;
+    const r = (m.role || '').toLowerCase().trim();
+    const d = (m.department || '').toLowerCase().trim();
+    return r === 'admin' || r === 'administrator' || r === 'staff director' || d === 'admin';
+  };
+
+  const isMemberActiveAdmin = (m) => {
+    return isMemberAdmin(m) && (m.status || 'Active') !== 'Inactive';
+  };
+
+  // Check if an active Admin already exists in team list (excluding the member currently being edited)
+  const activeAdminMember = teamMembers.find((m) => isMemberActiveAdmin(m));
+  const hasActiveAdminExcludingCurrent = teamMembers.some(
+    (m) => isMemberActiveAdmin(m) && (!editingMember || m.id !== editingMember.id)
+  );
+
+  // Modal Department options: Remove 'Admin' if an active Admin already exists
+  const modalDepartments = hasActiveAdminExcludingCurrent
+    ? allDepartments.filter((dept) => dept !== 'Admin')
+    : allDepartments;
+
+  // Modal Role options: Remove 'Admin' and 'Staff Director' if an active Admin already exists
+  const getModalRoles = (dept) => {
+    const rawRoles = departmentRoles[dept] || ['Staff Member'];
+    if (hasActiveAdminExcludingCurrent) {
+      return rawRoles.filter((r) => {
+        const lr = r.toLowerCase().trim();
+        return lr !== 'admin' && lr !== 'staff director';
+      });
+    }
+    return rawRoles;
   };
 
   const [formData, setFormData] = useState({
@@ -95,7 +126,7 @@ export default function TeamManagement({
     department: 'IT Department',
     role: 'IT Support Lead',
     status: 'Active',
-    phone: '+971 4 800 2201',
+    phone: ' ',
     avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces',
     password: '',
     confirmPassword: ''
@@ -117,15 +148,21 @@ export default function TeamManagement({
     setEditingMember(null);
     setPasswordError('');
     setEmailError('');
+    setAdminError('');
     setShowPassword(false);
     setShowConfirmPassword(false);
+
+    // If active admin already exists, default to 'IT Department'. If no active admin exists, default to 'Admin'.
+    const defaultDept = hasActiveAdminExcludingCurrent ? 'IT Department' : 'Admin';
+    const availableRoles = getModalRoles(defaultDept);
+
     setFormData({
       name: '',
       email: '',
-      department: 'IT Department',
-      role: 'Software Engineer',
+      department: defaultDept,
+      role: availableRoles[0] || 'IT Support Lead',
       status: 'Active',
-      phone: '+971 4 800 2201',
+      phone: '',
       avatar: `https://images.unsplash.com/photo-${1534528741775 + Math.floor(Math.random() * 1000)}?w=100&h=100&fit=crop&crop=faces`,
       password: '',
       confirmPassword: ''
@@ -137,16 +174,17 @@ export default function TeamManagement({
     setEditingMember(member);
     setPasswordError('');
     setEmailError('');
+    setAdminError('');
     setShowPassword(false);
     setShowConfirmPassword(false);
-    const memberDept = departments.includes(member.department) ? member.department : 'IT Department';
+    const memberDept = allDepartments.includes(member.department) ? member.department : 'IT Department';
     setFormData({
       name: member.name || '',
       email: member.email || '',
       department: memberDept,
       role: member.role || departmentRoles[memberDept]?.[0] || 'IT Support Lead',
       status: member.status === 'Inactive' ? 'Inactive' : 'Active',
-      phone: member.phone || '+971 4 800 2201',
+      phone: member.phone || '',
       avatar: member.avatar || '',
       password: member.password || '',
       confirmPassword: member.password || ''
@@ -155,12 +193,14 @@ export default function TeamManagement({
   };
 
   const handleDepartmentChange = (newDept) => {
-    const defaultRoleForDept = departmentRoles[newDept]?.[0] || 'Staff Member';
+    const roles = getModalRoles(newDept);
+    const defaultRoleForDept = roles[0] || 'Staff Member';
     setFormData((prev) => ({
       ...prev,
       department: newDept,
       role: defaultRoleForDept
     }));
+    if (adminError) setAdminError('');
   };
 
   const handleFileChange = (e) => {
@@ -240,9 +280,58 @@ export default function TeamManagement({
     return true;
   };
 
+  const validateAdminAvailability = async (memberData) => {
+    // Only restrict if setting department to Admin or role to Admin/Staff Director and status is Active
+    if (!isMemberAdmin(memberData) || memberData.status === 'Inactive') {
+      setAdminError('');
+      return true;
+    }
+
+    // 1. Check local state
+    const localAdmin = teamMembers.find(
+      (m) => isMemberActiveAdmin(m) && (!editingMember || m.id !== editingMember.id)
+    );
+    if (localAdmin) {
+      setAdminError(`An active Admin already exists (${localAdmin.name} - ${localAdmin.email}). Only one active Admin account is permitted. Please deactivate or change the existing Admin first.`);
+      return false;
+    }
+
+    // 2. Check live Supabase database
+    if (isSupabaseConfigured()) {
+      const client = getSupabaseClient();
+      if (client) {
+        try {
+          const { data, error } = await client
+            .from('team_members')
+            .select('id, name, email, role, department, status')
+            .neq('status', 'Inactive');
+
+          if (!error && Array.isArray(data)) {
+            const remoteAdmin = data.find(
+              (m) => isMemberActiveAdmin(m) && (!editingMember || m.id !== editingMember.id)
+            );
+            if (remoteAdmin) {
+              setAdminError(`An active Admin account already exists in database (${remoteAdmin.name} - ${remoteAdmin.email}). Please deactivate the active Admin first.`);
+              return false;
+            }
+          }
+        } catch (err) {
+          console.warn('Error checking remote admin status:', err);
+        }
+      }
+    }
+
+    setAdminError('');
+    return true;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!formData.name.trim() || !formData.email.trim()) return;
+
+    // Check single active admin rule
+    const isAdminAllowed = await validateAdminAvailability(formData);
+    if (!isAdminAllowed) return;
 
     // Check duplicate email
     const isEmailAvailable = await validateEmailIsUnique(formData.email);
@@ -281,7 +370,7 @@ export default function TeamManagement({
 
     // Separate confirmPassword out of saved object
     const { confirmPassword, ...memberPayload } = formData;
-    const finalPassword = memberPayload.password || editingMember?.password || 'password123';
+    const finalPassword = memberPayload.password || editingMember?.password || '';
 
     if (editingMember) {
       if (onUpdateMember) {
@@ -323,18 +412,26 @@ export default function TeamManagement({
       {/* Top Banner & Add CTA */}
       <div className="border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 bg-white dark:bg-neutral-950 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-xs">
         <div>
-          <div className="flex items-center gap-2 mb-1.5">
-            <span className="text-xs font-mono font-bold tracking-wider text-emerald-700 dark:text-emerald-400 uppercase bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-300 dark:border-emerald-800/70 px-2.5 py-0.5 rounded">
-              Corporate Organization & Privileges
-            </span>
-          </div>
           <h2 className="text-2xl font-bold text-neutral-900 dark:text-white tracking-tight flex items-center gap-2.5">
             <Users className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
             <span>Staff Directory & Access Management</span>
           </h2>
           <p className="text-sm text-neutral-600 dark:text-neutral-400 mt-1">
-            Manage personnel across IT, Finance & Accounts, HR, and Facilities Management.
+            Manage personnel across Admin, IT, Finance & Accounts, HR, and Facilities Management.
           </p>
+          <div className="mt-2.5 flex items-center gap-2 flex-wrap">
+            {activeAdminMember ? (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800 text-xs font-mono font-semibold text-purple-700 dark:text-purple-300">
+                <Shield className="w-3.5 h-3.5 text-purple-600 dark:text-purple-400 shrink-0" />
+                <span>Active Admin: {activeAdminMember.name} ({activeAdminMember.role || 'Admin'})</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-xs font-mono font-semibold text-amber-700 dark:text-amber-300">
+                <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>Admin Role: Available (No active admin configured)</span>
+              </span>
+            )}
+          </div>
         </div>
 
         <button
@@ -372,7 +469,7 @@ export default function TeamManagement({
               <option value="All Departments" className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
                 All Departments
               </option>
-              {departments.map((dept) => (
+              {allDepartments.map((dept) => (
                 <option key={dept} value={dept} className="bg-white dark:bg-neutral-900 text-neutral-900 dark:text-neutral-100">
                   {dept}
                 </option>
@@ -591,8 +688,8 @@ export default function TeamManagement({
                   }}
                   placeholder="tariq@albazzam.com"
                   className={`w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border rounded text-neutral-900 dark:text-neutral-200 focus:outline-none transition-colors ${emailError
-                      ? 'border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/10'
-                      : 'border-neutral-300 dark:border-neutral-800 focus:border-neutral-700'
+                    ? 'border-rose-500 ring-2 ring-rose-500/20 bg-rose-50/10'
+                    : 'border-neutral-300 dark:border-neutral-800 focus:border-neutral-700'
                     }`}
                 />
                 {emailError && (
@@ -705,6 +802,19 @@ export default function TeamManagement({
                 </p>
               </div>
 
+              {/* Admin Restriction / Availability Alert Banner */}
+              {adminError && (
+                <div className="p-3 bg-rose-50 dark:bg-rose-950/40 border border-rose-300 dark:border-rose-800 rounded text-xs text-rose-800 dark:text-rose-200 flex items-start gap-2 animate-in fade-in">
+                  <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="block font-bold">Admin Account Limitation:</strong>
+                    <span>{adminError}</span>
+                  </div>
+                </div>
+              )}
+
+
+
               {/* Department & Role Category */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {/* Department Selection */}
@@ -717,7 +827,7 @@ export default function TeamManagement({
                     onChange={(e) => handleDepartmentChange(e.target.value)}
                     className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-neutral-900 dark:text-neutral-200 focus:outline-none focus:border-neutral-700 text-xs font-medium"
                   >
-                    {departments.map((dept) => (
+                    {modalDepartments.map((dept) => (
                       <option key={dept} value={dept}>
                         {dept}
                       </option>
@@ -732,10 +842,13 @@ export default function TeamManagement({
                   </label>
                   <select
                     value={formData.role}
-                    onChange={(e) => setFormData({ ...formData, role: e.target.value })}
+                    onChange={(e) => {
+                      setFormData({ ...formData, role: e.target.value });
+                      if (adminError) setAdminError('');
+                    }}
                     className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-neutral-900 dark:text-neutral-200 focus:outline-none focus:border-neutral-700 text-xs font-medium"
                   >
-                    {(departmentRoles[formData.department] || []).map((r) => (
+                    {getModalRoles(formData.department).map((r) => (
                       <option key={r} value={r}>
                         {r}
                       </option>
@@ -770,7 +883,7 @@ export default function TeamManagement({
                     type="text"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    placeholder="+971 4 800 2201"
+                    placeholder=""
                     className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-neutral-900 dark:text-neutral-200 focus:outline-none focus:border-neutral-700"
                   />
                 </div>

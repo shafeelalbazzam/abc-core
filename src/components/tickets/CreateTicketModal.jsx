@@ -13,11 +13,12 @@ import {
   Trash2,
   Paperclip,
   CheckCircle2,
-  Link as LinkIcon
+  Link as LinkIcon,
+  Shield
 } from 'lucide-react';
 import { useWindowsModalAlert } from '../../utils/useWindowsModalAlert';
 
-export default function CreateTicketModal({ isOpen, onClose, onCreateTicket, currentUser }) {
+export default function CreateTicketModal({ isOpen, onClose, onCreateTicket, currentUser, teamMembers = [] }) {
   const { isAlerting, handleBackdropClick } = useWindowsModalAlert();
   const fileInputRef = useRef(null);
 
@@ -28,6 +29,7 @@ export default function CreateTicketModal({ isOpen, onClose, onCreateTicket, cur
     department: 'IT',
     category: 'Software',
     priority: 'Medium',
+    assigneeName: '',
     description: '',
     attachments: []
   });
@@ -35,6 +37,41 @@ export default function CreateTicketModal({ isOpen, onClose, onCreateTicket, cur
   const [urlInput, setUrlInput] = useState('');
   const [showUrlInput, setShowUrlInput] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+
+  // Check if current user is IT department / admin or regular employee
+  const isITDept =
+    currentUser?.role === 'admin' ||
+    currentUser?.role === 'it_support' ||
+    (currentUser?.department && (
+      currentUser.department.toLowerCase().trim() === 'it' ||
+      currentUser.department.toLowerCase().trim() === 'it department' ||
+      currentUser.department.toLowerCase().includes('it')
+    )) ||
+    (currentUser?.role && (
+      currentUser.role.toLowerCase().includes('it') ||
+      currentUser.role.toLowerCase().includes('software') ||
+      currentUser.role.toLowerCase().includes('support') ||
+      currentUser.role.toLowerCase().includes('engineer') ||
+      currentUser.role.toLowerCase().includes('admin')
+    ));
+  const isReadOnlyEmployee = currentUser?.role === 'employee' && !isITDept;
+
+  // Filter ONLY IT Department staff members for assignment
+  const itStaffMembers = teamMembers.filter((m) => {
+    const dept = (m.department || '').toLowerCase().trim();
+    const role = (m.role || '').toLowerCase().trim();
+    return (
+      dept === 'it' ||
+      dept === 'it department' ||
+      dept.includes('it') ||
+      role.includes('it') ||
+      role.includes('support') ||
+      role.includes('software') ||
+      role.includes('engineer') ||
+      role.includes('admin') ||
+      role.includes('developer')
+    );
+  });
 
   useEffect(() => {
     if (isOpen) {
@@ -206,11 +243,11 @@ export default function CreateTicketModal({ isOpen, onClose, onCreateTicket, cur
               <input
                 type="text"
                 required
-                readOnly={currentUser?.role === 'employee'}
+                readOnly={isReadOnlyEmployee}
                 value={formData.requesterName}
                 onChange={(e) => setFormData({ ...formData, requesterName: e.target.value })}
                 placeholder="e.g. Fatima Al Shamsi"
-                className={`w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-neutral-900 dark:text-neutral-200 focus:outline-none focus:border-neutral-700 ${currentUser?.role === 'employee' ? 'cursor-not-allowed opacity-80 bg-neutral-100 dark:bg-neutral-800/60' : ''
+                className={`w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-neutral-900 dark:text-neutral-200 focus:outline-none focus:border-neutral-700 ${isReadOnlyEmployee ? 'cursor-not-allowed opacity-80 bg-neutral-100 dark:bg-neutral-800/60' : ''
                   }`}
               />
             </div>
@@ -222,14 +259,14 @@ export default function CreateTicketModal({ isOpen, onClose, onCreateTicket, cur
               <input
                 type="email"
                 required
-                readOnly={currentUser?.role === 'employee'}
+                readOnly={isReadOnlyEmployee}
                 value={formData.requesterEmail}
                 onChange={(e) => setFormData({ ...formData, requesterEmail: e.target.value })}
                 placeholder="fatima@albazzam.com"
-                className={`w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-neutral-900 dark:text-neutral-200 focus:outline-none focus:border-neutral-700 ${currentUser?.role === 'employee' ? 'cursor-not-allowed opacity-80 bg-neutral-100 dark:bg-neutral-800/60' : ''
+                className={`w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-neutral-900 dark:text-neutral-200 focus:outline-none focus:border-neutral-700 ${isReadOnlyEmployee ? 'cursor-not-allowed opacity-80 bg-neutral-100 dark:bg-neutral-800/60' : ''
                   }`}
               />
-              {currentUser?.role === 'employee' && (
+              {isReadOnlyEmployee && (
                 <span className="text-[10px] text-emerald-600 dark:text-emerald-400 mt-1 block font-mono">
                   ✓ Verified employee account ({currentUser.email})
                 </span>
@@ -303,6 +340,31 @@ export default function CreateTicketModal({ isOpen, onClose, onCreateTicket, cur
                 <option value="Urgent">Urgent — Critical production system downtime</option>
               </select>
             </div>
+          </div>
+
+          {/* Assign Engineer / Staff (IT Department Only) */}
+          <div>
+            <label className="block text-xs font-mono uppercase text-neutral-600 dark:text-neutral-400 mb-1 font-bold flex items-center justify-between">
+              <span className="flex items-center gap-1.5">
+                <Shield className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                <span>Assign Engineer / Staff (IT Department)</span>
+              </span>
+              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-mono font-semibold">
+                IT Dept Only
+              </span>
+            </label>
+            <select
+              value={formData.assigneeName || ''}
+              onChange={(e) => setFormData({ ...formData, assigneeName: e.target.value })}
+              className="w-full px-3 py-2 bg-neutral-50 dark:bg-neutral-900 border border-neutral-300 dark:border-neutral-800 rounded text-neutral-900 dark:text-neutral-200 focus:outline-none focus:border-neutral-700 text-xs font-medium"
+            >
+              <option value="">Unassigned (IT Support Pool)</option>
+              {itStaffMembers.map((member) => (
+                <option key={member.id} value={member.name}>
+                  {member.name} — {member.role || 'IT Support'} ({member.department || 'IT Department'})
+                </option>
+              ))}
+            </select>
           </div>
 
           {/* Description */}

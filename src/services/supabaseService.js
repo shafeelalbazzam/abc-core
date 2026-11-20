@@ -10,6 +10,59 @@ import { getSupabaseClient, isSupabaseConfigured } from '../lib/supabaseClient';
 // ==========================================
 // TICKETS
 // ==========================================
+export const normalizeTicketRecord = (d) => {
+  if (!d) return null;
+
+  // Load local unread overrides if available
+  let cachedUnreadMap = {};
+  if (typeof window !== 'undefined') {
+    try {
+      cachedUnreadMap = JSON.parse(localStorage.getItem('abc_unread_tickets') || '{}');
+    } catch { }
+  }
+
+  let normalizedRequester = {
+    name: 'Staff Member',
+    email: '',
+    department: d.department || 'General',
+    avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces'
+  };
+  if (typeof d.requester === 'object' && d.requester !== null) {
+    normalizedRequester = {
+      name: d.requester.name || 'Staff Member',
+      email: d.requester.email || '',
+      department: d.requester.department || d.department || 'General',
+      avatar: d.requester.avatar || normalizedRequester.avatar
+    };
+  } else if (typeof d.requester === 'string' && d.requester.trim()) {
+    if (d.requester.includes('@')) {
+      normalizedRequester.email = d.requester.trim();
+      normalizedRequester.name = d.requester.split('@')[0];
+    } else {
+      normalizedRequester.name = d.requester.trim();
+    }
+  }
+
+  const unreadResolved = d.id in cachedUnreadMap ? Boolean(cachedUnreadMap[d.id]) : Boolean(d.unread);
+  const conv = Array.isArray(d.conversation) ? d.conversation : (Array.isArray(d.timeline) ? d.timeline : (Array.isArray(d.replies) ? d.replies : []));
+
+  return {
+    ...d,
+    subject: d.title || d.subject || 'Untitled Incident',
+    requester: normalizedRequester,
+    unread: unreadResolved,
+    isUnread: unreadResolved,
+    timeline: conv,
+    replies: conv,
+    conversation: conv,
+    assignee: d.assigned_to
+      ? (typeof d.assigned_to === 'object' ? d.assigned_to : { name: d.assigned_to, email: '', avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&h=100&fit=crop&crop=faces' })
+      : { name: 'IT Support Team', email: 'support@albazzam.com', avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&h=100&fit=crop&crop=faces' },
+    createdAt: d.created_at ? new Date(d.created_at).toLocaleDateString() : 'Recently',
+    updatedAt: d.updated_at ? new Date(d.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently',
+  };
+};
+
 export const fetchTicketsFromSupabase = async () => {
   const client = getSupabaseClient();
   if (!client) return null;
@@ -22,47 +75,14 @@ export const fetchTicketsFromSupabase = async () => {
     console.warn('Error fetching tickets from Supabase:', error.message);
     return null;
   }
-  return data.map((d) => {
-    let normalizedRequester = {
-      name: 'Staff Member',
-      email: '',
-      department: d.department || 'General',
-      avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=100&h=100&fit=crop&crop=faces'
-    };
-    if (typeof d.requester === 'object' && d.requester !== null) {
-      normalizedRequester = {
-        name: d.requester.name || 'Staff Member',
-        email: d.requester.email || '',
-        department: d.requester.department || d.department || 'General',
-        avatar: d.requester.avatar || normalizedRequester.avatar
-      };
-    } else if (typeof d.requester === 'string' && d.requester.trim()) {
-      if (d.requester.includes('@')) {
-        normalizedRequester.email = d.requester.trim();
-        normalizedRequester.name = d.requester.split('@')[0];
-      } else {
-        normalizedRequester.name = d.requester.trim();
-      }
-    }
 
-    return {
-      ...d,
-      subject: d.title || d.subject || 'Untitled Incident',
-      requester: normalizedRequester,
-      isUnread: Boolean(d.unread),
-      timeline: d.conversation || d.timeline || [],
-      assignee: d.assigned_to
-        ? (typeof d.assigned_to === 'object' ? d.assigned_to : { name: d.assigned_to, email: '', avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&h=100&fit=crop&crop=faces' })
-        : { name: 'IT Support Team', email: 'support@albazzam.com', avatar: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?w=100&h=100&fit=crop&crop=faces' },
-      createdAt: d.created_at ? new Date(d.created_at).toLocaleDateString() : 'Recently',
-      updatedAt: d.updated_at ? new Date(d.updated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Recently',
-    };
-  });
+  return data.map((d) => normalizeTicketRecord(d));
 };
 
 export const syncTicketToSupabase = async (ticket) => {
   const client = getSupabaseClient();
   if (!client) return;
+  const isUnreadVal = ticket.isUnread !== undefined ? Boolean(ticket.isUnread) : Boolean(ticket.unread);
   const payload = {
     id: String(ticket.id || `TICK-${Date.now()}`),
     title: ticket.title || ticket.subject || 'Untitled Incident',
@@ -73,9 +93,9 @@ export const syncTicketToSupabase = async (ticket) => {
     status: ticket.status || 'Open',
     requester: ticket.requester || {},
     assigned_to: ticket.assignee?.name || ticket.assigned_to || '',
-    conversation: ticket.timeline || ticket.conversation || [],
+    conversation: ticket.timeline || ticket.replies || ticket.conversation || [],
     attachments: ticket.attachments || [],
-    unread: Boolean(ticket.unread || ticket.isUnread),
+    unread: isUnreadVal,
     updated_at: new Date().toISOString()
   };
   const { error } = await client
@@ -84,6 +104,26 @@ export const syncTicketToSupabase = async (ticket) => {
 
   if (error) {
     console.error('Error syncing ticket to Supabase:', error.message);
+  }
+};
+
+export const updateTicketUnreadStatusInSupabase = async (ticketId, isUnread) => {
+  const client = getSupabaseClient();
+  if (!client) return;
+  try {
+    const { error } = await client
+      .from('tickets')
+      .update({
+        unread: Boolean(isUnread),
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', String(ticketId));
+
+    if (error) {
+      console.warn('Error updating ticket unread status in Supabase:', error.message);
+    }
+  } catch (err) {
+    console.warn('Exception updating ticket unread status:', err);
   }
 };
 
@@ -97,6 +137,50 @@ export const deleteTicketFromSupabase = async (ticketId) => {
 
   if (error) {
     console.error('Error deleting ticket from Supabase:', error.message);
+  }
+};
+
+/**
+ * Subscribe to live Realtime changes on public.tickets in Supabase
+ */
+export const subscribeToTicketsRealtime = (callbacks = {}) => {
+  const client = getSupabaseClient();
+  if (!client) return null;
+
+  try {
+    const channelId = `tickets_realtime_${Math.random().toString(36).slice(2, 9)}`;
+    const channel = client
+      .channel(channelId)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tickets' },
+        (payload) => {
+          const { eventType, new: newRec, old: oldRec } = payload;
+          if (eventType === 'INSERT' && callbacks.onInsert && newRec) {
+            callbacks.onInsert(normalizeTicketRecord(newRec));
+          } else if (eventType === 'UPDATE' && callbacks.onUpdate && newRec) {
+            callbacks.onUpdate(normalizeTicketRecord(newRec));
+          } else if (eventType === 'DELETE' && callbacks.onDelete && oldRec) {
+            callbacks.onDelete(oldRec.id);
+          }
+        }
+      )
+      .subscribe((status, err) => {
+        if (callbacks.onStatusChange) {
+          callbacks.onStatusChange(status, err);
+        }
+      });
+
+    return () => {
+      try {
+        client.removeChannel(channel);
+      } catch (err) {
+        console.warn('Error removing realtime channel:', err);
+      }
+    };
+  } catch (err) {
+    console.warn('Could not initialize Supabase Realtime channel:', err);
+    return null;
   }
 };
 
@@ -115,29 +199,105 @@ export const fetchServicesFromSupabase = async () => {
     console.warn('Error fetching services from Supabase:', error.message);
     return null;
   }
-  return data.map((s) => ({
-    ...s,
-    features: s.deliverables || s.features || [],
-    status: s.active === false ? 'Inactive' : 'Active'
-  }));
+  return data.map((s) => {
+    let subcategories = [];
+    let images = [];
+    let features = [];
+
+    // 1. Direct columns if present (from updated schema)
+    if (Array.isArray(s.subcategories) && s.subcategories.length > 0) {
+      subcategories = s.subcategories;
+    }
+    if (Array.isArray(s.images) && s.images.length > 0) {
+      images = s.images;
+    }
+
+    // 2. Fallback to deliverables JSONB object/array
+    if (subcategories.length === 0 || images.length === 0) {
+      if (s.deliverables && typeof s.deliverables === 'object' && !Array.isArray(s.deliverables)) {
+        if (subcategories.length === 0) subcategories = Array.isArray(s.deliverables.subcategories) ? s.deliverables.subcategories : [];
+        if (images.length === 0) images = Array.isArray(s.deliverables.images) ? s.deliverables.images : [];
+        features = Array.isArray(s.deliverables.features) ? s.deliverables.features : [];
+      } else if (Array.isArray(s.deliverables)) {
+        if (s.deliverables.length > 0 && typeof s.deliverables[0] === 'object') {
+          if (subcategories.length === 0) subcategories = s.deliverables;
+        } else {
+          features = s.deliverables;
+        }
+      }
+    }
+
+    if (images.length === 0 && s.image) {
+      images = [s.image];
+    }
+
+    return {
+      ...s,
+      tagline: s.tagline || '',
+      images,
+      image: images[0] || s.image || '',
+      subcategories,
+      features: features.length > 0 ? features : subcategories.map((sc) => (typeof sc === 'object' ? sc.name : sc)),
+      status: s.status || (s.active === false ? 'Inactive' : 'Active')
+    };
+  });
 };
 
 export const syncServiceToSupabase = async (service) => {
   const client = getSupabaseClient();
   if (!client) return;
+
+  const images = Array.isArray(service.images) && service.images.length > 0
+    ? service.images
+    : (service.image ? [service.image] : []);
+
+  const subcategories = Array.isArray(service.subcategories) ? service.subcategories : [];
+  const features = Array.isArray(service.features) && service.features.length > 0
+    ? service.features
+    : subcategories.map((sc) => (typeof sc === 'object' ? sc.name : sc));
+
   const payload = {
     id: String(service.id || `srv-${Date.now()}`),
     title: service.title || 'Untitled Service',
-    category: service.category || 'Core',
+    category: service.category || 'Engineering',
     badge: service.badge || '',
+    tagline: service.tagline || '',
     description: service.description || '',
-    deliverables: service.deliverables || service.features || [],
+    images,
+    subcategories,
+    deliverables: {
+      images,
+      subcategories,
+      features
+    },
     icon: service.icon || 'Wrench',
-    image: service.image || '',
-    active: service.active !== undefined ? Boolean(service.active) : service.status !== 'Inactive'
+    image: images[0] || service.image || '',
+    status: service.status || 'Active',
+    active: service.active !== undefined ? Boolean(service.active) : service.status !== 'Inactive',
+    updated_at: new Date().toISOString()
   };
+
   const { error } = await client.from('services').upsert(payload);
-  if (error) console.error('Error syncing service:', error.message);
+  if (error) {
+    // If the remote table has not yet run the migration adding images/subcategories columns:
+    if (error.code === 'PGRST204') {
+      const legacyPayload = {
+        id: payload.id,
+        title: payload.title,
+        category: payload.category,
+        badge: payload.badge,
+        description: payload.description,
+        deliverables: payload.deliverables,
+        icon: payload.icon,
+        image: payload.image,
+        active: payload.active
+      };
+      const { error: legacyErr } = await client.from('services').upsert(legacyPayload);
+      if (legacyErr) console.error('Error syncing service:', legacyErr.message);
+    } else {
+      console.error('Error syncing service:', error.message);
+    }
+  }
 };
 
 export const deleteServiceFromSupabase = async (serviceId) => {

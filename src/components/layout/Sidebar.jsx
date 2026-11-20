@@ -5,6 +5,7 @@ import {
   Globe,
   Users,
   Settings,
+  Building2,
   ChevronLeft,
   ChevronRight,
   Sun,
@@ -37,8 +38,19 @@ export default function Sidebar({
 }) {
   const role = currentUser?.role || 'employee';
 
+  const userDept = (currentUser?.department || '').toLowerCase().trim();
+  const userRole = (currentUser?.role || '').toLowerCase().trim();
+  const isITDepartment =
+    userDept === 'it' ||
+    userDept === 'it department' ||
+    userDept.includes('it department') ||
+    userDept.startsWith('it') ||
+    userRole.includes('it') ||
+    userRole.includes('admin') ||
+    userRole === 'it_support';
+
   const getNavSections = () => {
-    if (role === 'employee') {
+    if (role === 'employee' && !isITDepartment) {
       return [
         {
           heading: 'EMPLOYEE SERVICES',
@@ -56,12 +68,13 @@ export default function Sidebar({
               badge: ticketCount,
               badgeClass: 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30',
             },
+
           ]
         }
       ];
     }
 
-    if (role === 'cms_editor') {
+    if (role === 'cms_editor' && !isITDepartment) {
       return [
         {
           heading: 'DIGITAL CONTENT',
@@ -81,7 +94,7 @@ export default function Sidebar({
       ];
     }
 
-    // Admin & IT Support roles (Both have access to Tickets + CMS)
+    // Admin & IT Department roles have full features access
     return [
       {
         heading: 'OPERATIONS',
@@ -100,6 +113,7 @@ export default function Sidebar({
               ? 'bg-rose-500/20 text-rose-700 dark:text-rose-300 border border-rose-500/40 animate-pulse'
               : 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-300 border border-emerald-500/30',
           },
+
         ]
       },
       {
@@ -120,24 +134,16 @@ export default function Sidebar({
       {
         heading: 'ORGANIZATION',
         items: [
-          ...(role === 'admin' || role === 'it_support'
-            ? [
-              {
-                id: 'team',
-                label: 'Staff Directory',
-                icon: Users,
-              },
-            ]
-            : []),
-          ...(role === 'admin'
-            ? [
-              {
-                id: 'settings',
-                label: 'System Settings',
-                icon: Settings,
-              },
-            ]
-            : []),
+          {
+            id: 'team',
+            label: 'Staff Directory',
+            icon: Users,
+          },
+          {
+            id: 'settings',
+            label: 'System Settings',
+            icon: Settings,
+          },
         ]
       }
     ];
