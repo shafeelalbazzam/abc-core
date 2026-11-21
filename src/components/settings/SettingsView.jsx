@@ -106,7 +106,7 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 CREATE TABLE IF NOT EXISTS public.tickets (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, title TEXT NOT NULL, description TEXT, category TEXT DEFAULT 'Software', department TEXT DEFAULT 'IT Department', priority TEXT DEFAULT 'Medium', status TEXT DEFAULT 'Open', requester JSONB DEFAULT '{}'::jsonb, assigned_to TEXT, conversation JSONB DEFAULT '[]'::jsonb, attachments JSONB DEFAULT '[]'::jsonb, unread BOOLEAN DEFAULT false, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS public.services (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, title TEXT NOT NULL, category TEXT DEFAULT 'Engineering', badge TEXT, tagline TEXT, description TEXT, image TEXT, images JSONB DEFAULT '[]'::jsonb, subcategories JSONB DEFAULT '[]'::jsonb, deliverables JSONB DEFAULT '[]'::jsonb, icon TEXT DEFAULT 'Wrench', status TEXT DEFAULT 'Active', active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS public.careers (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, title TEXT NOT NULL, department TEXT NOT NULL, location TEXT DEFAULT 'Abu Dhabi / Dubai, UAE', type TEXT DEFAULT 'Full Time', experience TEXT DEFAULT '3+ Years', qualification TEXT DEFAULT 'Degree / Diploma in relevant field', description TEXT, responsibilities JSONB DEFAULT '[]'::jsonb, requirements JSONB DEFAULT '[]'::jsonb, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW());
-CREATE TABLE IF NOT EXISTS public.trusted_partners (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, name TEXT NOT NULL, logo TEXT, website_url TEXT, description TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS public.trusted_partners (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, name TEXT NOT NULL, logo TEXT, website_url TEXT, description TEXT, active BOOLEAN DEFAULT true, created_at TIMESTAMPTZ DEFAULT NOW(), updated_at TIMESTAMPTZ DEFAULT NOW());
 CREATE TABLE IF NOT EXISTS public.team_members (id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text, name TEXT NOT NULL, email TEXT UNIQUE NOT NULL, password TEXT DEFAULT 'password123', role TEXT DEFAULT 'IT Support Lead', department TEXT DEFAULT 'IT Department', status TEXT DEFAULT 'Active', phone TEXT, avatar TEXT, tickets_assigned INTEGER DEFAULT 0, last_active TEXT DEFAULT 'Just now', created_at TIMESTAMPTZ DEFAULT NOW());
 
 ALTER TABLE public.tickets ALTER COLUMN id SET DEFAULT gen_random_uuid()::text;
@@ -121,6 +121,13 @@ ALTER TABLE public.services ADD COLUMN IF NOT EXISTS subcategories JSONB DEFAULT
 ALTER TABLE public.services ADD COLUMN IF NOT EXISTS deliverables JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.services ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active';
 ALTER TABLE public.services ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS logo TEXT;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS website_url TEXT;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
 
 ALTER TABLE public.tickets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.services ENABLE ROW LEVEL SECURITY;

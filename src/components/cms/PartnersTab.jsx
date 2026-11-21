@@ -34,7 +34,8 @@ export default function PartnersTab({
   const [formData, setFormData] = useState({
     name: '',
     logo: '',
-    websiteUrl: ''
+    websiteUrl: '',
+    description: ''
   });
 
   const filtered = partners.filter((p) => {
@@ -413,7 +414,25 @@ export default function PartnersTab({
                 </div>
               </div>
 
-
+              {/* Field 4: Description / Partnership Scope (Optional) */}
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-mono font-bold text-neutral-700 dark:text-neutral-300 uppercase">
+                    4. Description / Alliance Details
+                  </label>
+                  <span className="text-[11px] text-neutral-500 font-mono font-normal lowercase">(optional)</span>
+                </div>
+                <div className="relative">
+                  <FileText className="w-4 h-4 absolute left-3 top-3 text-neutral-400 pointer-events-none" />
+                  <textarea
+                    rows={3}
+                    value={formData.description}
+                    onChange={(e) => setFormData({ ...formData, description: e.target.value })}
+                    placeholder="Brief overview of partnership scope, joint ventures, or technology alliance..."
+                    className="w-full pl-9 pr-3 py-2 bg-neutral-50 dark:bg-neutral-950 border border-neutral-300 dark:border-neutral-800 rounded text-sm text-neutral-900 dark:text-neutral-100 focus:outline-none focus:border-emerald-500 placeholder-neutral-400 resize-none font-sans"
+                  />
+                </div>
+              </div>
 
               {/* Action Buttons */}
               <div className="flex items-center justify-end gap-3 pt-4 border-t border-neutral-200 dark:border-neutral-800">

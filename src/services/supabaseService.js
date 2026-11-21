@@ -399,7 +399,8 @@ export const syncPartnerToSupabase = async (partner) => {
     logo: partner.logo || '',
     website_url: partner.websiteUrl || partner.website_url || '',
     description: partner.description || '',
-    active: partner.active !== false
+    active: partner.active !== false,
+    updated_at: new Date().toISOString()
   };
   const { error } = await client.from('trusted_partners').upsert(payload);
   if (error) console.error('Error syncing partner:', error.message);

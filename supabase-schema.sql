@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS public.careers (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. TRUSTED PARTNERS TABLE (Website CMS Partners & Group Entities)
+-- 4. TRUSTED PARTNERS TABLE (Website CMS Partners & Group Entities - Matches CMS Form)
 CREATE TABLE IF NOT EXISTS public.trusted_partners (
   id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
   name TEXT NOT NULL,
@@ -67,7 +67,8 @@ CREATE TABLE IF NOT EXISTS public.trusted_partners (
   website_url TEXT,
   description TEXT,
   active BOOLEAN DEFAULT true,
-  created_at TIMESTAMPTZ DEFAULT NOW()
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- 5. TEAM MEMBERS TABLE (Staff Directory & System Access)
@@ -102,6 +103,19 @@ ALTER TABLE public.services ADD COLUMN IF NOT EXISTS images JSONB DEFAULT '[]'::
 ALTER TABLE public.services ADD COLUMN IF NOT EXISTS subcategories JSONB DEFAULT '[]'::jsonb;
 ALTER TABLE public.services ADD COLUMN IF NOT EXISTS status TEXT DEFAULT 'Active';
 ALTER TABLE public.services ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+-- Safe column additions for trusted_partners table (matches CMS Partner form)
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS name TEXT;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS logo TEXT;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS website_url TEXT;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS description TEXT;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS active BOOLEAN DEFAULT true;
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT NOW();
+ALTER TABLE public.trusted_partners ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ DEFAULT NOW();
+
+-- Indexes for fast query performance
+CREATE INDEX IF NOT EXISTS idx_trusted_partners_name ON public.trusted_partners (name);
+CREATE INDEX IF NOT EXISTS idx_trusted_partners_active ON public.trusted_partners (active);
 
 -- =========================================================================
 -- ROW LEVEL SECURITY (RLS) POLICIES
