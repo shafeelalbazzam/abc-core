@@ -392,23 +392,26 @@ export const fetchPartnersFromSupabase = async () => {
 
 export const syncPartnerToSupabase = async (partner) => {
   const client = getSupabaseClient();
-  if (!client) return;
+  if (!client) return { error: new Error('Database client not configured') };
   const payload = {
-    id: String(partner.id || `prt-${Date.now()}`),
+    id: String(partner.id || `ptr-${Date.now()}`),
     name: partner.name || 'Untitled Partner',
     logo: partner.logo || '',
     website_url: partner.websiteUrl || partner.website_url || '',
     description: partner.description || '',
-    active: partner.active !== false,
-    updated_at: new Date().toISOString()
+    active: partner.active !== false
   };
-  const { error } = await client.from('trusted_partners').upsert(payload);
-  if (error) console.error('Error syncing partner:', error.message);
+  const { data, error } = await client.from('trusted_partners').upsert(payload).select();
+  if (error) {
+    console.error('Error syncing partner to Supabase:', error.message);
+    return { error };
+  }
+  return { data, error: null };
 };
 
 export const deletePartnerFromSupabase = async (partnerId) => {
   const client = getSupabaseClient();
-  if (!client) return;
+  if (!client) return { error: new Error('Database client not configured') };
   const { error } = await client
     .from('trusted_partners')
     .delete()
@@ -416,7 +419,9 @@ export const deletePartnerFromSupabase = async (partnerId) => {
 
   if (error) {
     console.error('Error deleting partner from Supabase:', error.message);
+    return { error };
   }
+  return { error: null };
 };
 
 // ==========================================

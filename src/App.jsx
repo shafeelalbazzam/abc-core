@@ -100,7 +100,14 @@ export default function App() {
   const [tickets, setTickets] = useState(initialTickets);
   const [services, setServices] = useState(initialServices);
   const [careers, setCareers] = useState(initialCareers);
-  const [trustedPartners, setTrustedPartners] = useState(initialTrustedPartners);
+  const [trustedPartners, setTrustedPartners] = useState(() => {
+    try {
+      const saved = localStorage.getItem('abc_trusted_partners');
+      return saved ? JSON.parse(saved) : initialTrustedPartners;
+    } catch {
+      return initialTrustedPartners;
+    }
+  });
   const [cmsPages, setCmsPages] = useState(initialCmsPages);
   const [banners, setBanners] = useState(initialBanners);
   const [articles, setArticles] = useState(initialArticles);
@@ -129,6 +136,13 @@ export default function App() {
       document.documentElement.classList.remove('dark');
     }
   }, [theme]);
+
+  // Persist trusted partners locally for immediate resilience on reload
+  useEffect(() => {
+    try {
+      localStorage.setItem('abc_trusted_partners', JSON.stringify(trustedPartners));
+    } catch { }
+  }, [trustedPartners]);
 
   // Ensure non-employee accounts (Admin & IT Support / IT Department) cannot stay on or navigate to employee portal
   useEffect(() => {
@@ -441,10 +455,10 @@ export default function App() {
     const isAlexStatic = !reply.author || reply.author.includes('Alex Rivera') || reply.author.includes('Alex Rivers');
     const dynamicAuthor = isAlexStatic
       ? (currentUser?.name
-          ? (currentUser.role === 'admin' || currentUser.role === 'it_support' || isITDept(currentUser)
-              ? `${currentUser.name} (${currentUser.department || 'IT Support'})`
-              : currentUser.name)
-          : 'IT Support Specialist')
+        ? (currentUser.role === 'admin' || currentUser.role === 'it_support' || isITDept(currentUser)
+          ? `${currentUser.name} (${currentUser.department || 'IT Support'})`
+          : currentUser.name)
+        : 'IT Support Specialist')
       : reply.author;
 
     const dynamicRole = isAlexStatic
@@ -714,22 +728,43 @@ export default function App() {
   };
 
   // CMS Trusted Partners Handlers
-  const handleAddPartner = (newPartner) => {
-    setTrustedPartners([newPartner, ...trustedPartners]);
-    syncPartnerToSupabase(newPartner);
+  const handleAddPartner = async (newPartner) => {
+    setTrustedPartners((prev) => [newPartner, ...prev]);
     showToast(`Partner "${newPartner.name}" added.`);
+    const res = await syncPartnerToSupabase(newPartner);
+    if (res?.error) {
+      showToast({
+        type: 'error',
+        title: 'Database Sync Issue',
+        message: res.error.message || 'Could not store partner in database'
+      });
+    }
   };
 
-  const handleUpdatePartner = (updatedPartner) => {
-    setTrustedPartners(trustedPartners.map((p) => (p.id === updatedPartner.id ? updatedPartner : p)));
-    syncPartnerToSupabase(updatedPartner);
+  const handleUpdatePartner = async (updatedPartner) => {
+    setTrustedPartners((prev) => prev.map((p) => (p.id === updatedPartner.id ? updatedPartner : p)));
     showToast(`Partner "${updatedPartner.name}" updated.`);
+    const res = await syncPartnerToSupabase(updatedPartner);
+    if (res?.error) {
+      showToast({
+        type: 'error',
+        title: 'Database Sync Issue',
+        message: res.error.message || 'Could not update partner in database'
+      });
+    }
   };
 
-  const handleDeletePartner = (partnerId) => {
-    setTrustedPartners(trustedPartners.filter((p) => p.id !== partnerId));
-    deletePartnerFromSupabase(partnerId);
+  const handleDeletePartner = async (partnerId) => {
+    setTrustedPartners((prev) => prev.filter((p) => p.id !== partnerId));
     showToast('Partner removed.');
+    const res = await deletePartnerFromSupabase(partnerId);
+    if (res?.error) {
+      showToast({
+        type: 'error',
+        title: 'Database Sync Issue',
+        message: res.error.message || 'Could not delete partner from database'
+      });
+    }
   };
 
   // Legacy CMS Handlers
